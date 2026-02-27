@@ -638,8 +638,8 @@ export default function ClaimsList() {
             </Button>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs" style={{ minWidth: "900px" }}>
+          <div className="overflow-x-auto scrollbar-visible">
+            <table className="text-xs" style={{ minWidth: Object.values(columnWidths).reduce((a, b) => a + b, 0) + "px" }}>
               <thead className="sticky top-0 z-10 bg-muted/50 backdrop-blur-sm">
                 <tr className="border-b">
                   {COLUMNS.map((col) => (
