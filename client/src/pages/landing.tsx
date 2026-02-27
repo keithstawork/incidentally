@@ -23,7 +23,7 @@ export default function Landing() {
           <div className="grid gap-12 lg:grid-cols-2 lg:gap-16 items-center">
             <div className="flex flex-col gap-6">
               <h1 className="font-serif text-4xl font-bold tracking-tight lg:text-5xl">
-                Workers' Comp Claims,{" "}
+                <span className="text-foreground">Claims</span>{" "}
                 <span className="text-primary">Simplified</span>
               </h1>
               <p className="text-lg text-muted-foreground leading-relaxed">
