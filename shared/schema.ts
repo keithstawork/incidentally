@@ -35,6 +35,7 @@ export const claimStatusEnum = pgEnum("claim_status", [
   "Closed",
   "Denied",
   "Incident Only",
+  "Incident Report",
   "Not reported/Incident only 1099",
 ]);
 

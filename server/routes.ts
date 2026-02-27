@@ -229,7 +229,10 @@ export async function registerRoutes(
             row.workerType = "W2";
           }
 
-          const validStatuses = ["Open", "Closed", "Denied", "Incident Only", "Not reported/Incident only 1099"];
+          if (row.claimStatus === "Not reported/Incident only 1099") {
+            row.claimStatus = "Incident Report";
+          }
+          const validStatuses = ["Open", "Closed", "Denied", "Incident Only", "Incident Report"];
           if (row.claimStatus && !validStatuses.includes(row.claimStatus)) {
             row.claimStatus = "Open";
           }
