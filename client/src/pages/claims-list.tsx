@@ -6,20 +6,12 @@ import {
   Plus,
   Download,
   X,
-  ChevronDown,
   ArrowUp,
   ArrowDown,
   Filter,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Popover,
@@ -55,15 +47,6 @@ const STAGE_BADGE_VARIANTS: Record<string, string> = {
   closed: "bg-gray-100 text-gray-600 border-gray-200",
 };
 
-const FILTER_PRESETS = [
-  { label: "All Claims", filters: {} },
-  { label: "Open Claims", filters: { claimStatus: "Open" } },
-  { label: "Litigation", filters: { litigated: "true" } },
-  { label: "W2 Claims", filters: { workerType: "W2" } },
-  { label: "1099 Claims", filters: { workerType: "1099" } },
-  { label: "Intake Queue", filters: { stage: "intake" } },
-  { label: "Active Claims", filters: { stage: "active_claim" } },
-];
 
 function formatDate(date: string | null | undefined): string {
   if (!date) return "-";
@@ -333,8 +316,6 @@ function ColumnFilterPopover({
 
 export default function ClaimsList() {
   const [search, setSearch] = useState("");
-  const [activeFilters, setActiveFilters] = useState<Record<string, string>>({});
-  const [activePreset, setActivePreset] = useState("All Claims");
   const [columnFilters, setColumnFilters] = useState<Record<string, Set<string>>>({});
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
     const initial: Record<string, number> = {};
@@ -381,11 +362,7 @@ export default function ClaimsList() {
   const { toast } = useToast();
 
   const queryParams = new URLSearchParams();
-  Object.entries(activeFilters).forEach(([key, value]) => {
-    if (value) queryParams.set(key, value);
-  });
   if (search) queryParams.set("search", search);
-
   const queryString = queryParams.toString();
   const { data: allClaims = [], isLoading } = useQuery<Claim[]>({
     queryKey: ["/api/claims", "list", queryString],
@@ -429,21 +406,13 @@ export default function ClaimsList() {
     return filtered;
   }, [allClaims, columnFilters, sortKey, sortDir]);
 
-  const handlePreset = (preset: (typeof FILTER_PRESETS)[0]) => {
-    setActivePreset(preset.label);
-    setActiveFilters(preset.filters);
-  };
-
   const clearFilters = () => {
-    setActiveFilters({});
-    setActivePreset("All Claims");
     setSearch("");
     setColumnFilters({});
     setSortKey(null);
   };
 
   const hasActiveFilters =
-    Object.keys(activeFilters).length > 0 ||
     search.length > 0 ||
     Object.values(columnFilters).some((s) => s.size > 0);
 
@@ -553,7 +522,6 @@ export default function ClaimsList() {
             </h1>
             <p className="text-sm text-muted-foreground">
               {claims.length} {claims.length === 1 ? "claim" : "claims"}
-              {activePreset !== "All Claims" && ` (${activePreset})`}
               {activeColumnFilterCount > 0 &&
                 ` · ${activeColumnFilterCount} column filter${activeColumnFilterCount > 1 ? "s" : ""}`}
             </p>
@@ -590,42 +558,6 @@ export default function ClaimsList() {
             />
           </div>
 
-          <div className="flex items-center gap-1.5 overflow-x-auto">
-            {FILTER_PRESETS.map((preset) => (
-              <Button
-                key={preset.label}
-                variant={activePreset === preset.label ? "default" : "outline"}
-                size="sm"
-                className="h-7 text-xs whitespace-nowrap"
-                onClick={() => handlePreset(preset)}
-                data-testid={`filter-${preset.label.toLowerCase().replace(/\s/g, "-")}`}
-              >
-                {preset.label}
-              </Button>
-            ))}
-          </div>
-
-          <Select
-            value={activeFilters.stateOfInjury || ""}
-            onValueChange={(v) =>
-              setActiveFilters((f) => ({ ...f, stateOfInjury: v === "all" ? "" : v }))
-            }
-          >
-            <SelectTrigger className="h-7 w-[100px] text-xs" data-testid="select-state-filter">
-              <SelectValue placeholder="State" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All States</SelectItem>
-              {["CA", "GA", "TX", "FL", "NY", "NV", "AZ", "IL", "OH", "PA"].map(
-                (s) => (
-                  <SelectItem key={s} value={s}>
-                    {s}
-                  </SelectItem>
-                )
-              )}
-            </SelectContent>
-          </Select>
-
           {hasActiveFilters && (
             <Button
               variant="ghost"
@@ -635,7 +567,7 @@ export default function ClaimsList() {
               data-testid="button-clear-filters"
             >
               <X className="mr-1 h-3 w-3" />
-              Clear
+              Clear all filters
             </Button>
           )}
         </div>
