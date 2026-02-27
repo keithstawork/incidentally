@@ -163,7 +163,10 @@ export async function registerRoutes(
         const row = rows[i];
         try {
           if (row.proName && (!row.firstName || !row.lastName)) {
-            const fullName = row.proName.trim();
+            let fullName = row.proName.trim().replace(/\n/g, " ");
+            fullName = fullName.replace(/\s*\(DOI\s+[\d/]+\)\s*$/i, "");
+            fullName = fullName.replace(/[\s_]+\d{1,2}\/\d{1,2}\/\d{2,4}\s*$/, "");
+            fullName = fullName.trim();
             const parts = fullName.split(/\s+/);
             if (parts.length === 1) {
               row.firstName = parts[0];
@@ -182,6 +185,26 @@ export async function registerRoutes(
             results.errors.push(`Row ${i + 1}: Missing required fields (firstName/proName, lastName, dateOfInjury, workerType, partnerName)`);
             results.skipped++;
             continue;
+          }
+
+          const parseDate = (val: string): string | null => {
+            if (!val) return null;
+            val = val.trim();
+            if (/^\d{4}-\d{2}-\d{2}$/.test(val)) return val;
+            const mdyMatch = val.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+            if (mdyMatch) {
+              let year = mdyMatch[3];
+              if (year.length === 2) year = (parseInt(year) > 50 ? "19" : "20") + year;
+              return `${year}-${mdyMatch[1].padStart(2, "0")}-${mdyMatch[2].padStart(2, "0")}`;
+            }
+            return val;
+          };
+
+          const dateFields = ["dateOfInjury", "dateSubmitted", "dateClosed", "dateEmployerNotified"];
+          for (const field of dateFields) {
+            if (row[field]) {
+              row[field] = parseDate(row[field]);
+            }
           }
 
           const workerTypeNormalize: Record<string, string> = {
@@ -216,7 +239,18 @@ export async function registerRoutes(
             row.stage = "intake";
           }
 
-          const validClaimTypes = ["Medical Only", "Other Than Medical Only", "Incident Only", "Incident Only W2", "Incident Only 1099", "Pending"];
+          const claimTypeNormalize: Record<string, string> = {
+            "other than medical only": "Other Than Medical Only",
+            "otherthanmedicalonly": "Other Than Medical Only",
+            "accidental medical expense": "Accidental Medical Expense",
+            "indemnity & medical": "Indemnity & Medical",
+            "indemnity": "Indemnity",
+          };
+          if (row.claimType) {
+            const ctLower = row.claimType.toLowerCase().trim();
+            row.claimType = claimTypeNormalize[ctLower] || row.claimType;
+          }
+          const validClaimTypes = ["Medical Only", "Other Than Medical Only", "Incident Only", "Incident Only W2", "Incident Only 1099", "Accidental Medical Expense", "Indemnity", "Indemnity & Medical", "Pending"];
           if (row.claimType && !validClaimTypes.includes(row.claimType)) {
             row.claimType = "Pending";
           }
@@ -226,7 +260,7 @@ export async function registerRoutes(
             "medicalPanelSent", "mpnDwc7Sent", "billOfRightsSent", "paidFullShift",
             "payIssuedViaIncentiveAdp", "fnolFiled", "froiFiled", "wageStatementSent",
             "earningsStatementSent", "gaWc1FormSent", "noShowCleared",
-            "lateCancellationCleared", "shiftsExcused",
+            "lateCancellationCleared", "shiftsExcused", "ratingComplaint",
           ];
           for (const field of booleanFields) {
             if (row[field] !== undefined) {
@@ -249,12 +283,16 @@ export async function registerRoutes(
             }
           }
 
+          if (row.stateOfInjury) {
+            row.stateOfInjury = row.stateOfInjury.trim().toUpperCase().substring(0, 2);
+          }
+
           await storage.createClaim({
-            firstName: row.firstName,
-            lastName: row.lastName,
+            firstName: row.firstName.trim(),
+            lastName: row.lastName.trim(),
             dateOfInjury: row.dateOfInjury,
             workerType: row.workerType,
-            partnerName: row.partnerName,
+            partnerName: row.partnerName.trim(),
             tpaClaimId: row.tpaClaimId || null,
             proId: row.proId || null,
             dateSubmitted: row.dateSubmitted || null,
@@ -308,6 +346,11 @@ export async function registerRoutes(
             noShowCleared: row.noShowCleared || false,
             lateCancellationCleared: row.lateCancellationCleared || false,
             shiftsExcused: row.shiftsExcused || false,
+            reportNumber: row.reportNumber || null,
+            notes: row.notes || null,
+            litigationNotes: row.litigationNotes || null,
+            legalRequest: row.legalRequest || null,
+            ratingComplaint: row.ratingComplaint || false,
             intercomLink: row.intercomLink || null,
             shiftLink: row.shiftLink || null,
             irLink: row.irLink || null,

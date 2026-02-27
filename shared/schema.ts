@@ -24,6 +24,9 @@ export const claimTypeEnum = pgEnum("claim_type", [
   "Incident Only",
   "Incident Only W2",
   "Incident Only 1099",
+  "Accidental Medical Expense",
+  "Indemnity",
+  "Indemnity & Medical",
   "Pending",
 ]);
 
@@ -126,6 +129,12 @@ export const claims = pgTable("claims", {
   noShowCleared: boolean("no_show_cleared").default(false),
   lateCancellationCleared: boolean("late_cancellation_cleared").default(false),
   shiftsExcused: boolean("shifts_excused").default(false),
+
+  reportNumber: varchar("report_number", { length: 100 }),
+  notes: text("notes"),
+  litigationNotes: text("litigation_notes"),
+  legalRequest: text("legal_request"),
+  ratingComplaint: boolean("rating_complaint").default(false),
 
   intercomLink: text("intercom_link"),
   shiftLink: text("shift_link"),
