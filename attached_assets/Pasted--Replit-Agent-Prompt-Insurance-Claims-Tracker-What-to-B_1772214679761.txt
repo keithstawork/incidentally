@@ -1,0 +1,291 @@
+# Replit Agent Prompt: Insurance Claims Tracker
+
+## What to Build
+
+Build a full-stack web application for tracking workers' compensation injury claims through a two-stage pipeline: initial injury intake (managed by Trust & Safety specialists) through active claims management (managed by Legal). The app replaces two Google Sheets that currently track ~1,200+ claims across these stages.
+
+## Tech Stack
+
+- **Frontend:** React with TypeScript, Tailwind CSS, shadcn/ui components
+- **Backend:** Node.js/Express API (or Next.js full-stack)
+- **Database:** PostgreSQL (via Replit's built-in Postgres)
+- **Auth:** Simple role-based auth (email/password or Google OAuth)
+- **Email:** Gmail API integration for creating claims from emails
+
+---
+
+## Data Model
+
+### Core Entity: `Claim`
+
+A single claim record moves through stages. Every claim starts as an injury submission and may escalate to an active/litigated claim. The key fields (derived from our actual spreadsheets):
+
+#### Identity & Basics
+- `id` (auto-generated primary key)
+- `tpa_claim_id` (string, nullable — may be "TBD" initially, assigned by TPA later)
+- `first_name`, `last_name` (claimant/injured worker)
+- `pro_id` (string, nullable — internal worker ID)
+- `date_of_injury` (date)
+- `date_submitted` (date — when the injury was reported to us)
+- `date_employer_notified` (date)
+- `date_closed` (date, nullable)
+
+#### Classification
+- `worker_type` (enum: "W2", "1099", "CL" for cross-over/late)
+- `claim_type` (enum: "Medical Only", "Other Than Medical Only", "Incident Only", "Incident Only W2", "Incident Only 1099", "Pending")
+- `claim_status` (enum: "Open", "Closed", "Denied", "Incident Only", "Not reported/Incident only 1099")
+- `injury_type` (string — e.g., "Fall/Slip/Trip", "Contusion", "Cut/Laceration", "Strain: Repetitive movement", "Falling Object", "Other")
+- `state_of_injury` (US state abbreviation)
+- `shift_type` (string — e.g., "Warehouse Associate", "Event Server", "Custodial", "Dishwasher", "Prep Cook", "General Labor", etc.)
+- `litigated` (boolean, default false)
+
+#### Parties
+- `partner_name` (string — the client/business where injury occurred, e.g., "Venetian Expo Custodial", "Phoenix Convention Center")
+- `insured_name` (string — e.g., "Advantage Workforce Services, LLC" or "Garuda Labs Inc dba Instawork")
+- `carrier` (string — e.g., "WorkFirst", "Great American")
+- `policy_year` (string)
+- `policy_number` (string)
+
+#### People / Assignments
+- `tns_specialist` (string — Trust & Safety specialist who handled intake, e.g., "Carlos", "Janeth", "Bob")
+- `adjuster` (string, nullable — TPA adjuster name)
+- `applicant_attorney` (string, nullable — claimant's attorney, labeled "AA" in our sheets)
+- `defense_attorney` (string, nullable — labeled "DA")
+
+#### Pipeline Stage
+- `stage` (enum: "intake", "active_claim", "litigation", "settled", "closed")
+  - `intake` = initial T&S processing (Injury Submission sheet equivalent)
+  - `active_claim` = open WC claim being managed (Open Claims sheet equivalent)
+  - `litigation` = claim has attorney involvement
+  - `settled` = settlement reached, awaiting closure
+  - `closed` = fully resolved
+
+#### Case Summary & Strategy (populated as claim matures)
+- `tldr` (text — executive summary of the claim, can be long/detailed)
+- `next_steps` (text — current action items summary)
+- `severity_and_prognosis` (text)
+- `future_medical_expense` (text)
+- `pathway` (text — strategic options, e.g., "1. Defend at Hearing. 2. Nuisance Settlement.")
+- `pathway_steps` (text — details for each pathway option)
+- `pathway_when_to_use` (text — decision criteria for each pathway)
+
+#### Financials
+- `total_payments` (decimal, default 0)
+- `total_outstanding` (decimal, default 0)
+- `total_incurred` (decimal, computed: payments + outstanding)
+- `incentive_amount` (decimal — pay issued to worker)
+- `medical_total` (decimal)
+- `temporary_disability` (boolean)
+- `losses_paid` (decimal)
+- `permanent_total_disability` (boolean)
+- `loss_adjusting_expenses` (decimal)
+- `mmi` (boolean — Maximum Medical Improvement reached)
+- `impairment_rating` (string, nullable)
+- `settlement_recommendation` (decimal, nullable)
+- `settlement_authority` (decimal, nullable)
+- `actual_settlement_amount` (decimal, nullable)
+- `settlement_savings` (decimal, nullable — computed: authority - actual)
+
+#### Compliance Checklist (all booleans, default false)
+- `medical_panel_sent` (W2 only)
+- `mpn_dwc7_sent` (W2/CA only)
+- `bill_of_rights_sent` (W2/GA only)
+- `paid_full_shift`
+- `pay_issued_via_incentive_adp`
+- `fnol_filed` (First Notice of Loss)
+- `froi_filed` (First Report of Injury)
+- `wage_statement_sent`
+- `earnings_statement_sent` (1099 only)
+- `ga_wc1_form_sent` (GA only)
+- `no_show_cleared` (boolean)
+- `late_cancellation_cleared` (boolean)
+- `shifts_excused` (boolean)
+
+#### External Links (all nullable strings/URLs)
+- `intercom_link`
+- `shift_link`
+- `ir_link` (incident report)
+- `medical_docs_link`
+
+#### Metadata
+- `created_at`, `updated_at` (timestamps)
+- `created_by` (user who created the record)
+- `source_email_id` (nullable — Gmail message ID if created from email)
+
+### Related Entity: `ClaimNote`
+
+An append-only log of updates, action items, and communications on a claim.
+
+- `id`
+- `claim_id` (foreign key)
+- `note_type` (enum: "update", "action_item_adjuster", "action_item_aws", "action_item_legal", "general_note", "email_thread", "status_change")
+- `content` (text)
+- `author` (string — who wrote it)
+- `target_date` (date, nullable — for action items)
+- `completed` (boolean, default false — for action items)
+- `created_at`
+
+### Related Entity: `ClaimStatusHistory`
+
+Track all status transitions for audit trail.
+
+- `id`
+- `claim_id` (foreign key)
+- `from_status`, `to_status`
+- `from_stage`, `to_stage`
+- `changed_by`
+- `changed_at`
+- `reason` (text, nullable)
+
+---
+
+## User Roles
+
+### Trust & Safety Specialist
+- Can create new claims (injury intake)
+- Can edit intake-stage fields
+- Can view all claims
+- Can add notes
+- Can escalate claim to "active_claim" stage (handoff to Legal)
+
+### Legal
+- Can edit all fields on all claims
+- Can manage litigation, settlement, and strategy fields
+- Can view and manage all claims across all stages
+- Primary owner of claims in "active_claim", "litigation", and "settled" stages
+
+### Admin
+- Full access to everything
+- Can manage users and roles
+
+---
+
+## Key Views & Pages
+
+### 1. Dashboard (Home)
+- Summary cards: total open claims, new this week, total incurred (open claims), claims in litigation, claims pending action
+- Quick-access filters: My Claims, Needs Attention, Recently Updated
+- Simple chart: claims by status, claims by month (incident date)
+
+### 2. Claims List (Primary Working View)
+This is the most important view — it replaces the spreadsheet. Must support:
+
+- **Column-based table view** with sortable, filterable columns
+- **Saved filter presets:**
+  - "Open Claims" (status = Open)
+  - "My Intake Queue" (stage = intake, assigned to current user)
+  - "Litigation" (litigated = true)
+  - "W2 Claims" / "1099 Claims"
+  - "By State" filter
+  - "By Partner" filter
+  - "By Carrier" filter
+  - "High Value" (total incurred > configurable threshold)
+  - "Needs Follow-Up" (has action items with past target dates)
+- **Search:** Free-text search across claimant name, partner name, TPA claim ID, notes
+- **Bulk actions:** Export to CSV, bulk status update
+- **Inline editing** for quick field updates (status, next steps, adjuster) without opening full record
+
+### 3. Claim Detail Page
+Full view of a single claim with tabbed sections:
+
+- **Overview Tab:** All core fields in organized sections (Identity, Classification, Parties, Financials, Settlement)
+- **Case Strategy Tab:** TL;DR, Next Steps, Pathway, Severity/Prognosis (rich text editing)
+- **Notes & Activity Tab:** Chronological feed of all ClaimNotes, with ability to add new ones. Filter by note type. Action items show with checkboxes and target dates.
+- **Compliance Tab:** The checklist items with checkboxes. Auto-show/hide fields based on worker type and state (e.g., only show GA Bill of Rights for GA claims, only show MPN/DWC7 for CA claims)
+- **History Tab:** Full audit trail of status/stage changes
+
+### 4. Intake Form (New Claim)
+- Streamlined form for T&S specialists to create new claims
+- Required fields: first name, last name, date of injury, worker type, partner name, state, injury type, shift type
+- Optional fields available but not required at intake
+- "Create from Email" button that pre-populates whatever it can from a Gmail message
+
+### 5. Handoff View
+- When T&S is ready to hand off to Legal, there should be a clear "Escalate to Active Claim" action
+- This changes the stage and optionally notifies the Legal team
+- T&S can add handoff notes summarizing what they've done so far
+
+---
+
+## Gmail Integration
+
+### Option A: In-App Email Connection (Preferred)
+- OAuth connection to Gmail account
+- "Create Claim from Email" workflow:
+  1. User clicks "New Claim from Email" in the app
+  2. App shows recent emails (or user searches/pastes a Gmail link)
+  3. App displays the email and a side-by-side claim form
+  4. User fills in fields (some may be pre-populated if parseable, but don't over-engineer this — most injury alert emails are informal/unstructured like "we have an injured worker, call me")
+  5. Email is linked to the claim record (store Gmail message ID)
+  6. Future emails in the same thread can be associated with the claim
+
+### Option B: Email Forwarding (Simpler fallback)
+- Dedicated email address (e.g., claims@[app-domain])
+- Forwarding an email creates a draft claim with the email body attached
+- User then enriches the claim manually
+
+### For both options:
+- Store a reference link back to the original email
+- Allow associating additional emails with an existing claim later
+- Do NOT try to auto-parse unstructured emails into claim fields — the emails are too informal. Just make it easy to create a claim while looking at an email.
+
+---
+
+## Important Behaviors
+
+### Auto-Computed Fields
+- `total_incurred` = `total_payments` + `total_outstanding`
+- `settlement_savings` = `settlement_authority` - `actual_settlement_amount`
+- Claim age (days since incident date)
+- Days since last update
+
+### Conditional Field Display
+- Show W2-specific compliance fields only when `worker_type` = "W2"
+- Show 1099-specific fields only when `worker_type` = "1099"
+- Show state-specific fields based on `state_of_injury` (GA Bill of Rights, CA MPN/DWC7)
+- Show litigation fields (attorneys, pathway, settlement) only when `litigated` = true or stage is "litigation"
+
+### Stage Transitions
+- intake → active_claim (T&S handoff to Legal)
+- active_claim → litigation (when attorney gets involved)
+- litigation → settled (when settlement reached)
+- Any stage → closed (when fully resolved)
+- Allow backward transitions (e.g., litigation claim drops attorney, goes back to active_claim)
+
+### Data Validation
+- TPA Claim ID should be unique (when not "TBD")
+- Date of injury must be in the past
+- Settlement amount should not exceed settlement authority (warn, don't block)
+- Required fields enforced at each stage (intake needs less than active_claim)
+
+---
+
+## Seed Data
+
+The app should include the ability to import CSV data. I will provide two CSV files that map to this schema:
+1. **Injury Submission Data** — maps primarily to intake-stage claims with compliance checklists and T&S fields
+2. **Open Claims** — maps primarily to active_claim/litigation stage claims with case strategy and financial fields
+
+The import should:
+- Match records across the two CSVs by claimant name + date of injury (they track the same claims at different stages)
+- Merge data from both sheets into a single unified claim record
+- Preserve all notes, action items, and financial data
+
+---
+
+## Non-Goals (for V1)
+- No automated email parsing/AI extraction from email body (emails are too unstructured)
+- No direct Intercom integration (just store the link)
+- No document storage/management (just links to Google Drive for now)
+- No automated notifications/reminders (future feature)
+- No mobile-optimized design (desktop-first is fine)
+- No real-time collaboration/live updates
+
+---
+
+## Design Notes
+- Clean, professional UI — this is an internal legal tool, not consumer-facing
+- Dense information display (legal users want to see lots of data, not big cards with whitespace)
+- Table views should feel spreadsheet-like with tight rows
+- Use color coding for claim status (green = closed, yellow = open, red = litigation, gray = incident only)
+- Dark/light mode not required
