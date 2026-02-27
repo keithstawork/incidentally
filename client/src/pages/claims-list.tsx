@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
@@ -332,8 +333,13 @@ export default function ClaimsList() {
   const [dragCol, setDragCol] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
   const [dragSide, setDragSide] = useState<"left" | "right">("left");
+  const [dragPos, setDragPos] = useState<{ x: number; y: number } | null>(null);
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const dragStartedRef = useRef(false);
+  const dragStartMouseRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
   const tableContainerRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
   const resizingRef = useRef<{
     colKey: string;
     startX: number;
@@ -522,58 +528,85 @@ export default function ClaimsList() {
     return columnOrder.map((key) => colMap.get(key)!).filter(Boolean);
   }, [columnOrder]);
 
-  const handleDragStart = useCallback((e: React.DragEvent, colKey: string) => {
-    setDragCol(colKey);
-    e.dataTransfer.effectAllowed = "move";
-    const th = e.currentTarget as HTMLElement;
-    const ghost = th.cloneNode(true) as HTMLElement;
-    ghost.style.width = `${th.offsetWidth}px`;
-    ghost.style.opacity = "0.85";
-    ghost.style.background = "hsl(var(--primary) / 0.08)";
-    ghost.style.border = "1.5px solid hsl(var(--primary) / 0.4)";
-    ghost.style.borderRadius = "6px";
-    ghost.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)";
-    ghost.style.position = "absolute";
-    ghost.style.top = "-9999px";
-    ghost.style.left = "-9999px";
-    document.body.appendChild(ghost);
-    e.dataTransfer.setDragImage(ghost, th.offsetWidth / 2, th.offsetHeight / 2);
-    requestAnimationFrame(() => document.body.removeChild(ghost));
-  }, []);
-
-  const handleDragOver = useCallback((e: React.DragEvent, colKey: string) => {
+  const handleColDragMouseDown = useCallback((e: React.MouseEvent, colKey: string) => {
+    if (e.button !== 0) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    if (colKey !== dragCol) {
-      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      const midX = rect.left + rect.width / 2;
-      setDragSide(e.clientX < midX ? "left" : "right");
-      setDragOverCol(colKey);
-    }
-  }, [dragCol]);
+    dragStartedRef.current = false;
+    dragStartMouseRef.current = { x: e.clientX, y: e.clientY };
 
-  const handleDrop = useCallback((targetKey: string) => {
-    if (!dragCol || dragCol === targetKey) {
-      setDragCol(null);
-      setDragOverCol(null);
-      return;
-    }
-    setColumnOrder((prev) => {
-      const next = [...prev];
-      const fromIdx = next.indexOf(dragCol);
-      next.splice(fromIdx, 1);
-      const toIdx = next.indexOf(targetKey);
-      const insertIdx = dragSide === "right" ? toIdx + 1 : toIdx;
-      next.splice(insertIdx, 0, dragCol);
-      return next;
-    });
-    setDragCol(null);
-    setDragOverCol(null);
-  }, [dragCol, dragSide]);
+    const th = (e.currentTarget as HTMLElement).closest("th") as HTMLElement;
+    const rect = th.getBoundingClientRect();
+    const offsetX = e.clientX - rect.left;
+    const offsetY = e.clientY - rect.top;
 
-  const handleDragEnd = useCallback(() => {
-    setDragCol(null);
-    setDragOverCol(null);
+    const pendingColKey = colKey;
+    const pendingOffset = { x: offsetX, y: offsetY };
+
+    const onMouseMove = (me: MouseEvent) => {
+      const dx = me.clientX - dragStartMouseRef.current.x;
+      const dy = me.clientY - dragStartMouseRef.current.y;
+      if (!dragStartedRef.current && Math.abs(dx) + Math.abs(dy) < 5) return;
+
+      if (!dragStartedRef.current) {
+        dragStartedRef.current = true;
+        setDragCol(pendingColKey);
+        setDragOffset(pendingOffset);
+      }
+
+      setDragPos({ x: me.clientX, y: me.clientY });
+
+      const table = tableRef.current;
+      if (!table) return;
+      const ths = Array.from(table.querySelectorAll<HTMLElement>("thead th"));
+      for (const t of ths) {
+        const key = t.dataset.colkey;
+        if (!key || key === pendingColKey) continue;
+        const r = t.getBoundingClientRect();
+        if (me.clientX >= r.left && me.clientX <= r.right) {
+          const mid = r.left + r.width / 2;
+          setDragOverCol(key);
+          setDragSide(me.clientX < mid ? "left" : "right");
+          break;
+        }
+      }
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+
+      if (dragStartedRef.current) {
+        setDragCol((currentDragCol) => {
+          setDragOverCol((currentOver) => {
+            setDragSide((currentSide) => {
+              if (currentDragCol && currentOver && currentDragCol !== currentOver) {
+                setColumnOrder((prev) => {
+                  const next = [...prev];
+                  const fromIdx = next.indexOf(currentDragCol);
+                  next.splice(fromIdx, 1);
+                  const toIdx = next.indexOf(currentOver);
+                  const insertIdx = currentSide === "right" ? toIdx + 1 : toIdx;
+                  next.splice(insertIdx, 0, currentDragCol);
+                  return next;
+                });
+              }
+              return currentSide;
+            });
+            return null;
+          });
+          return null;
+        });
+        setDragPos(null);
+      }
+      dragStartedRef.current = false;
+    };
+
+    document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
   }, []);
 
   const activeColumnFilterCount = Object.values(columnFilters).filter((s) => s.size > 0).length;
@@ -664,33 +697,31 @@ export default function ClaimsList() {
           </div>
         ) : (
           <div ref={tableContainerRef} className="overflow-x-auto scrollbar-visible">
-            <table className="text-xs" style={{ minWidth: Object.values(columnWidths).reduce((a, b) => a + b, 0) + "px" }}>
+            <table ref={tableRef} className="text-xs" style={{ minWidth: Object.values(columnWidths).reduce((a, b) => a + b, 0) + "px" }}>
               <thead className="sticky top-0 z-10 bg-muted/50 backdrop-blur-sm">
                 <tr className="border-b">
                   {orderedColumns.map((col) => (
                     <th
                       key={col.key}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, col.key)}
-                      onDragOver={(e) => handleDragOver(e, col.key)}
-                      onDrop={() => handleDrop(col.key)}
-                      onDragEnd={handleDragEnd}
-                      onDragLeave={() => { if (dragOverCol === col.key) setDragOverCol(null); }}
-                      className={`relative text-left text-[11px] uppercase tracking-wider font-medium text-muted-foreground px-3 py-2 select-none transition-all duration-150 ${
-                        dragCol === col.key ? "opacity-30 scale-95" : ""
-                      } ${dragCol && dragCol !== col.key ? "hover:bg-muted/40" : ""}`}
-                      style={{ width: columnWidths[col.key], minWidth: col.minWidth, cursor: dragCol ? "grabbing" : "grab" }}
+                      data-colkey={col.key}
+                      className={`relative text-left text-[11px] uppercase tracking-wider font-medium text-muted-foreground px-3 py-2 select-none transition-all duration-200 ${
+                        dragCol === col.key ? "opacity-20" : ""
+                      }`}
+                      style={{ width: columnWidths[col.key], minWidth: col.minWidth, cursor: "grab" }}
                     >
-                      {dragOverCol === col.key && dragCol !== col.key && (
+                      {dragOverCol === col.key && dragCol && dragCol !== col.key && (
                         <div
-                          className="absolute top-0 bottom-0 w-[3px] bg-primary rounded-full z-30 transition-all duration-150"
+                          className="absolute top-0 bottom-0 w-[3px] bg-primary rounded-full z-30"
                           style={{ [dragSide]: "-1.5px" }}
                         >
                           <div className="absolute -top-[3px] left-1/2 -translate-x-1/2 w-[9px] h-[9px] rounded-full bg-primary" />
                           <div className="absolute -bottom-[3px] left-1/2 -translate-x-1/2 w-[9px] h-[9px] rounded-full bg-primary" />
                         </div>
                       )}
-                      <div className="flex items-center gap-0.5">
+                      <div
+                        className="flex items-center gap-0.5"
+                        onMouseDown={(e) => handleColDragMouseDown(e, col.key)}
+                      >
                         <button
                           className="flex items-center gap-0.5 hover:text-foreground transition-colors"
                           onClick={() => handleSort(col.key)}
@@ -750,7 +781,9 @@ export default function ClaimsList() {
                       {orderedColumns.map((col) => (
                         <td
                           key={col.key}
-                          className="px-3 py-2 overflow-hidden"
+                          className={`px-3 py-2 overflow-hidden transition-opacity duration-200 ${
+                            dragCol === col.key ? "opacity-20" : ""
+                          }`}
                           style={{
                             width: columnWidths[col.key],
                             maxWidth: columnWidths[col.key],
@@ -768,6 +801,44 @@ export default function ClaimsList() {
           </div>
         )}
       </div>
+      {dragCol && dragPos && createPortal(
+        <div
+          className="fixed z-50 pointer-events-none"
+          style={{
+            left: dragPos.x - dragOffset.x,
+            top: dragPos.y - dragOffset.y,
+          }}
+        >
+          <div
+            className="rounded-lg border border-primary/30 bg-background/95 shadow-2xl backdrop-blur-sm overflow-hidden"
+            style={{ width: columnWidths[dragCol] }}
+          >
+            <div className="px-3 py-2 text-[11px] uppercase tracking-wider font-semibold text-primary bg-primary/5 border-b border-primary/20">
+              {orderedColumns.find((c) => c.key === dragCol)?.label}
+            </div>
+            <div className="max-h-[300px] overflow-hidden">
+              {claims.slice(0, 12).map((claim) => {
+                const col = orderedColumns.find((c) => c.key === dragCol);
+                if (!col) return null;
+                return (
+                  <div
+                    key={claim.id}
+                    className="px-3 py-2 text-xs border-b border-border/30 truncate"
+                  >
+                    {col.render ? col.render(claim) : col.getValue(claim)}
+                  </div>
+                );
+              })}
+              {claims.length > 12 && (
+                <div className="px-3 py-1.5 text-[10px] text-muted-foreground text-center">
+                  +{claims.length - 12} more
+                </div>
+              )}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
