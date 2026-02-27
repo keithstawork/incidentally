@@ -162,11 +162,44 @@ export async function registerRoutes(
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         try {
+          if (row.proName && (!row.firstName || !row.lastName)) {
+            const fullName = row.proName.trim();
+            const parts = fullName.split(/\s+/);
+            if (parts.length === 1) {
+              row.firstName = parts[0];
+              row.lastName = "";
+            } else if (parts.length === 2) {
+              row.firstName = parts[0];
+              row.lastName = parts[1];
+            } else {
+              row.firstName = parts[0];
+              row.lastName = parts.slice(1).join(" ");
+            }
+            delete row.proName;
+          }
+
           if (!row.firstName || !row.lastName || !row.dateOfInjury || !row.workerType || !row.partnerName) {
-            results.errors.push(`Row ${i + 1}: Missing required fields (firstName, lastName, dateOfInjury, workerType, partnerName)`);
+            results.errors.push(`Row ${i + 1}: Missing required fields (firstName/proName, lastName, dateOfInjury, workerType, partnerName)`);
             results.skipped++;
             continue;
           }
+
+          const workerTypeNormalize: Record<string, string> = {
+            w2: "W2",
+            "1099": "1099",
+            cl: "CL",
+            "workers compensation": "W2",
+            "workers comp": "W2",
+            "worker's comp": "W2",
+            "worker's compensation": "W2",
+            wc: "W2",
+            "occupational accident": "1099",
+            oa: "1099",
+            "contingent liability": "CL",
+            contingent: "CL",
+          };
+          const wtLower = String(row.workerType).toLowerCase().trim();
+          row.workerType = workerTypeNormalize[wtLower] || row.workerType;
 
           const validWorkerTypes = ["W2", "1099", "CL"];
           if (!validWorkerTypes.includes(row.workerType)) {

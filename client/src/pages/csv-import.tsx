@@ -35,10 +35,11 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 const CLAIM_FIELDS = [
+  { key: "proName", label: "Pro Name (Full — splits into First/Last)", required: false },
   { key: "firstName", label: "First Name", required: true },
   { key: "lastName", label: "Last Name", required: true },
   { key: "dateOfInjury", label: "Date of Injury", required: true },
-  { key: "workerType", label: "Worker Type (W2/1099/CL)", required: true },
+  { key: "workerType", label: "Shift Type (W2/1099/CL)", required: true },
   { key: "partnerName", label: "Partner Name", required: true },
   { key: "tpaClaimId", label: "TPA Claim ID", required: false },
   { key: "proId", label: "Pro ID", required: false },
@@ -127,6 +128,12 @@ function autoMapColumn(header: string): string {
   const normalized = header.toLowerCase().replace(/[^a-z0-9]/g, "");
 
   const mappings: Record<string, string> = {
+    proname: "proName",
+    "pro name": "proName",
+    "pro_name": "proName",
+    name: "proName",
+    "full name": "proName",
+    fullname: "proName",
     firstname: "firstName",
     first_name: "firstName",
     "first name": "firstName",
@@ -140,7 +147,15 @@ function autoMapColumn(header: string): string {
     workertype: "workerType",
     worker_type: "workerType",
     "worker type": "workerType",
+    shifttype: "workerType",
+    shift_type: "workerType",
+    "shift type": "workerType",
     type: "workerType",
+    w21099: "workerType",
+    "w2/1099": "workerType",
+    "workers compensation": "workerType",
+    "occupational accident": "workerType",
+    "contingent liability": "workerType",
     partnername: "partnerName",
     partner_name: "partnerName",
     partner: "partnerName",
@@ -169,9 +184,6 @@ function autoMapColumn(header: string): string {
     stateofinjury: "stateOfInjury",
     state_of_injury: "stateOfInjury",
     state: "stateOfInjury",
-    shifttype: "shiftType",
-    shift_type: "shiftType",
-    "shift type": "shiftType",
     shift: "shiftType",
     litigated: "litigated",
     insuredname: "insuredName",
@@ -301,9 +313,12 @@ export default function CsvImport() {
     return obj;
   });
 
-  const requiredFieldsMapped = ["firstName", "lastName", "dateOfInjury", "workerType", "partnerName"].every(
-    (f) => Object.values(columnMapping).includes(f)
-  );
+  const mappedValues = Object.values(columnMapping);
+  const hasProName = mappedValues.includes("proName");
+  const hasFirstLast = mappedValues.includes("firstName") && mappedValues.includes("lastName");
+  const requiredFieldsMapped =
+    (hasProName || hasFirstLast) &&
+    ["dateOfInjury", "workerType", "partnerName"].every((f) => mappedValues.includes(f));
 
   const importMutation = useMutation({
     mutationFn: async (rows: Record<string, string>[]) => {
@@ -475,7 +490,7 @@ export default function CsvImport() {
                     <h3 className="text-sm font-semibold">Map Columns</h3>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       {fileName} &mdash; {csvRows.length} rows, {csvHeaders.length} columns detected.
-                      Map each CSV column to a claim field.
+                      Map each CSV column to a claim field. Use "Pro Name" for a combined name column — it will auto-split into first/last. Shift type accepts W2, 1099, CL, Workers Compensation, Occupational Accident, or Contingent Liability.
                     </p>
                   </div>
                   {!requiredFieldsMapped && (
@@ -584,7 +599,7 @@ export default function CsvImport() {
                               {idx + 1}
                             </TableCell>
                             <TableCell className="font-medium">
-                              {row.firstName} {row.lastName}
+                              {row.proName ? row.proName : `${row.firstName || ""} ${row.lastName || ""}`}
                             </TableCell>
                             <TableCell>{row.dateOfInjury || "-"}</TableCell>
                             <TableCell>{row.workerType || "-"}</TableCell>
