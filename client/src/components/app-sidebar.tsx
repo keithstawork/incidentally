@@ -46,7 +46,7 @@ export function AppSidebar() {
           </div>
           <div className="flex flex-col">
             <span className="text-sm font-semibold tracking-tight"><span className="text-foreground">Incident</span><span className="text-primary">Ally</span></span>
-            <span className="text-[10px] text-muted-foreground">Workers' Comp Manager</span>
+            <span className="text-[10px] text-muted-foreground">Claims Simplified</span>
           </div>
         </div>
       </SidebarHeader>
