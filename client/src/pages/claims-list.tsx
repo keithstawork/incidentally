@@ -318,6 +318,7 @@ function ColumnFilterPopover({
 export default function ClaimsList() {
   const [search, setSearch] = useState("");
   const [columnFilters, setColumnFilters] = useState<Record<string, Set<string>>>({});
+  const [columnOrder, setColumnOrder] = useState<string[]>(() => COLUMNS.map((c) => c.key));
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
     const initial: Record<string, number> = {};
     COLUMNS.forEach((col) => {
@@ -328,6 +329,8 @@ export default function ClaimsList() {
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [hasManuallyResized, setHasManuallyResized] = useState(false);
+  const [dragCol, setDragCol] = useState<string | null>(null);
+  const [dragOverCol, setDragOverCol] = useState<string | null>(null);
 
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const resizingRef = useRef<{
@@ -346,11 +349,13 @@ export default function ClaimsList() {
       const totalDefault = COLUMNS.reduce((sum, col) => sum + col.defaultWidth, 0);
       if (availableWidth > totalDefault) {
         const scale = availableWidth / totalDefault;
-        const scaled: Record<string, number> = {};
-        COLUMNS.forEach((col) => {
-          scaled[col.key] = Math.floor(col.defaultWidth * scale);
+        setColumnWidths((prev) => {
+          const scaled: Record<string, number> = { ...prev };
+          COLUMNS.forEach((col) => {
+            scaled[col.key] = Math.floor(col.defaultWidth * scale);
+          });
+          return scaled;
         });
-        setColumnWidths(scaled);
       }
     };
 
@@ -511,6 +516,45 @@ export default function ClaimsList() {
     toast({ title: "Export complete", description: `${claims.length} claims exported.` });
   };
 
+  const orderedColumns = useMemo(() => {
+    const colMap = new Map(COLUMNS.map((c) => [c.key, c]));
+    return columnOrder.map((key) => colMap.get(key)!).filter(Boolean);
+  }, [columnOrder]);
+
+  const handleDragStart = useCallback((colKey: string) => {
+    setDragCol(colKey);
+  }, []);
+
+  const handleDragOver = useCallback((e: React.DragEvent, colKey: string) => {
+    e.preventDefault();
+    if (colKey !== dragCol) {
+      setDragOverCol(colKey);
+    }
+  }, [dragCol]);
+
+  const handleDrop = useCallback((targetKey: string) => {
+    if (!dragCol || dragCol === targetKey) {
+      setDragCol(null);
+      setDragOverCol(null);
+      return;
+    }
+    setColumnOrder((prev) => {
+      const next = [...prev];
+      const fromIdx = next.indexOf(dragCol);
+      const toIdx = next.indexOf(targetKey);
+      next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, dragCol);
+      return next;
+    });
+    setDragCol(null);
+    setDragOverCol(null);
+  }, [dragCol]);
+
+  const handleDragEnd = useCallback(() => {
+    setDragCol(null);
+    setDragOverCol(null);
+  }, []);
+
   const activeColumnFilterCount = Object.values(columnFilters).filter((s) => s.size > 0).length;
 
   return (
@@ -602,11 +646,18 @@ export default function ClaimsList() {
             <table className="text-xs" style={{ minWidth: Object.values(columnWidths).reduce((a, b) => a + b, 0) + "px" }}>
               <thead className="sticky top-0 z-10 bg-muted/50 backdrop-blur-sm">
                 <tr className="border-b">
-                  {COLUMNS.map((col) => (
+                  {orderedColumns.map((col) => (
                     <th
                       key={col.key}
-                      className="relative text-left text-[11px] uppercase tracking-wider font-medium text-muted-foreground px-3 py-2 select-none"
-                      style={{ width: columnWidths[col.key], minWidth: col.minWidth }}
+                      draggable
+                      onDragStart={() => handleDragStart(col.key)}
+                      onDragOver={(e) => handleDragOver(e, col.key)}
+                      onDrop={() => handleDrop(col.key)}
+                      onDragEnd={handleDragEnd}
+                      className={`relative text-left text-[11px] uppercase tracking-wider font-medium text-muted-foreground px-3 py-2 select-none transition-colors ${
+                        dragCol === col.key ? "opacity-50" : ""
+                      } ${dragOverCol === col.key ? "bg-primary/10 border-l-2 border-l-primary" : ""}`}
+                      style={{ width: columnWidths[col.key], minWidth: col.minWidth, cursor: "grab" }}
                     >
                       <div className="flex items-center gap-0.5">
                         <button
@@ -665,7 +716,7 @@ export default function ClaimsList() {
                       className="border-b border-border/50 hover:bg-muted/30 transition-colors cursor-pointer"
                       data-testid={`row-claim-${claim.id}`}
                     >
-                      {COLUMNS.map((col) => (
+                      {orderedColumns.map((col) => (
                         <td
                           key={col.key}
                           className="px-3 py-2 overflow-hidden"
