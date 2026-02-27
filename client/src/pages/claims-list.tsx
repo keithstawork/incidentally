@@ -345,12 +345,38 @@ export default function ClaimsList() {
   });
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [hasManuallyResized, setHasManuallyResized] = useState(false);
 
+  const tableContainerRef = useRef<HTMLDivElement>(null);
   const resizingRef = useRef<{
     colKey: string;
     startX: number;
     startWidth: number;
   } | null>(null);
+
+  useEffect(() => {
+    if (hasManuallyResized) return;
+    const container = tableContainerRef.current;
+    if (!container) return;
+
+    const fitColumns = () => {
+      const availableWidth = container.clientWidth;
+      const totalDefault = COLUMNS.reduce((sum, col) => sum + col.defaultWidth, 0);
+      if (availableWidth > totalDefault) {
+        const scale = availableWidth / totalDefault;
+        const scaled: Record<string, number> = {};
+        COLUMNS.forEach((col) => {
+          scaled[col.key] = Math.floor(col.defaultWidth * scale);
+        });
+        setColumnWidths(scaled);
+      }
+    };
+
+    fitColumns();
+    const observer = new ResizeObserver(fitColumns);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [hasManuallyResized]);
 
   const { toast } = useToast();
 
@@ -458,6 +484,7 @@ export default function ClaimsList() {
     (e: React.MouseEvent, colKey: string) => {
       e.preventDefault();
       e.stopPropagation();
+      setHasManuallyResized(true);
       resizingRef.current = {
         colKey,
         startX: e.clientX,
@@ -638,7 +665,7 @@ export default function ClaimsList() {
             </Button>
           </div>
         ) : (
-          <div className="overflow-x-auto scrollbar-visible">
+          <div ref={tableContainerRef} className="overflow-x-auto scrollbar-visible">
             <table className="text-xs" style={{ minWidth: Object.values(columnWidths).reduce((a, b) => a + b, 0) + "px" }}>
               <thead className="sticky top-0 z-10 bg-muted/50 backdrop-blur-sm">
                 <tr className="border-b">
