@@ -5,6 +5,7 @@ import {
   Plus,
   LogOut,
   Shield,
+  Upload,
 } from "lucide-react";
 import {
   Sidebar,
@@ -25,6 +26,7 @@ const navItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "All Claims", url: "/claims", icon: FileText },
   { title: "New Claim", url: "/claims/new", icon: Plus },
+  { title: "Import CSV", url: "/claims/import", icon: Upload },
 ];
 
 export function AppSidebar() {
@@ -57,7 +59,9 @@ export function AppSidebar() {
                 const isActive =
                   item.url === "/"
                     ? location === "/"
-                    : location.startsWith(item.url);
+                    : item.url === "/claims"
+                      ? location === "/claims"
+                      : location.startsWith(item.url);
                 return (
                   <SidebarMenuItem key={item.title}>
                     <SidebarMenuButton

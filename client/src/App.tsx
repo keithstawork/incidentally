@@ -12,6 +12,7 @@ import Dashboard from "@/pages/dashboard";
 import ClaimsList from "@/pages/claims-list";
 import ClaimDetail from "@/pages/claim-detail";
 import ClaimNew from "@/pages/claim-new";
+import CsvImport from "@/pages/csv-import";
 import { Skeleton } from "@/components/ui/skeleton";
 
 function AuthenticatedApp() {
@@ -33,6 +34,7 @@ function AuthenticatedApp() {
               <Route path="/" component={Dashboard} />
               <Route path="/claims" component={ClaimsList} />
               <Route path="/claims/new" component={ClaimNew} />
+              <Route path="/claims/import" component={CsvImport} />
               <Route path="/claims/:id" component={ClaimDetail} />
               <Route component={NotFound} />
             </Switch>

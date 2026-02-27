@@ -24,6 +24,7 @@ client/src/
     claims-list.tsx    - Main claims table with filters
     claim-detail.tsx   - Full claim view with tabbed sections
     claim-new.tsx      - New claim intake form
+    csv-import.tsx     - CSV bulk import with column mapping
 
 server/
   index.ts             - Express server entry
@@ -53,6 +54,7 @@ shared/
 - Conditional field display based on worker type (W2/1099) and state (GA/CA)
 - Compliance checklist with state-specific items
 - Action items with target dates and completion tracking
+- CSV bulk import with auto column mapping, preview, and validation
 
 ## Commands
 - `npm run dev` - Start dev server
