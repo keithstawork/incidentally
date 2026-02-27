@@ -45,7 +45,7 @@ export function AppSidebar() {
             <Shield className="h-4 w-4 text-primary-foreground" />
           </div>
           <div className="flex flex-col">
-            <span className="text-sm font-semibold tracking-tight">ClaimsTracker</span>
+            <span className="text-sm font-semibold tracking-tight"><span className="text-foreground">Incident</span><span className="text-primary">Ally</span></span>
             <span className="text-[10px] text-muted-foreground">Workers' Comp Manager</span>
           </div>
         </div>

@@ -10,7 +10,7 @@ export default function Landing() {
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
               <Shield className="h-4 w-4 text-primary-foreground" />
             </div>
-            <span className="font-semibold tracking-tight">ClaimsTracker</span>
+            <span className="font-semibold tracking-tight"><span className="text-foreground">Incident</span><span className="text-primary">Ally</span></span>
           </div>
           <Button asChild data-testid="button-login">
             <a href="/api/login">Sign In</a>
@@ -117,7 +117,7 @@ export default function Landing() {
 
       <footer className="border-t py-6">
         <div className="mx-auto max-w-6xl px-4 text-center text-xs text-muted-foreground">
-          ClaimsTracker &mdash; Internal Workers' Compensation Claims Management
+          IncidentAlly &mdash; Internal Workers' Compensation Claims Management
         </div>
       </footer>
     </div>
