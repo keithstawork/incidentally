@@ -30,7 +30,6 @@ const STATUS_BADGE_VARIANTS: Record<string, string> = {
   Denied: "bg-red-100 text-red-800 border-red-200",
   "Incident Only": "bg-gray-100 text-gray-600 border-gray-200",
   "Incident Report": "bg-gray-100 text-gray-500 border-gray-200",
-  "Not reported/Incident only 1099": "bg-gray-100 text-gray-500 border-gray-200",
 };
 
 const STAGE_LABELS: Record<string, string> = {

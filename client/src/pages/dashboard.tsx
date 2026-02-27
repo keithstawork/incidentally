@@ -40,7 +40,6 @@ const STATUS_COLORS: Record<string, string> = {
   Denied: "hsl(0, 72%, 50%)",
   "Incident Only": "hsl(220, 13%, 60%)",
   "Incident Report": "hsl(220, 13%, 75%)",
-  "Not reported/Incident only 1099": "hsl(220, 13%, 75%)",
 };
 
 function formatCurrency(amount: number): string {

@@ -38,7 +38,7 @@ import { useToast } from "@/hooks/use-toast";
 import type { Claim, ClaimNote, ClaimStatusHistory } from "@shared/schema";
 
 const STAGES = ["intake", "active_claim", "litigation", "settled", "closed"] as const;
-const STATUSES = ["Open", "Closed", "Denied", "Incident Only", "Incident Report", "Not reported/Incident only 1099"] as const;
+const STATUSES = ["Open", "Closed", "Denied", "Incident Only", "Incident Report"] as const;
 const STAGE_LABELS: Record<string, string> = {
   intake: "Intake",
   active_claim: "Active Claim",
