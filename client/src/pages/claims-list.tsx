@@ -122,7 +122,7 @@ const COLUMNS: ColumnDef[] = [
   },
   {
     key: "dateOfInjury",
-    label: "DOI",
+    label: "Injury Date",
     defaultWidth: 85,
     minWidth: 70,
     getValue: (c) => formatDate(c.dateOfInjury),
