@@ -331,6 +331,7 @@ export default function ClaimsList() {
   const [hasManuallyResized, setHasManuallyResized] = useState(false);
   const [dragCol, setDragCol] = useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = useState<string | null>(null);
+  const [dragSide, setDragSide] = useState<"left" | "right">("left");
 
   const tableContainerRef = useRef<HTMLDivElement>(null);
   const resizingRef = useRef<{
@@ -521,13 +522,32 @@ export default function ClaimsList() {
     return columnOrder.map((key) => colMap.get(key)!).filter(Boolean);
   }, [columnOrder]);
 
-  const handleDragStart = useCallback((colKey: string) => {
+  const handleDragStart = useCallback((e: React.DragEvent, colKey: string) => {
     setDragCol(colKey);
+    e.dataTransfer.effectAllowed = "move";
+    const th = e.currentTarget as HTMLElement;
+    const ghost = th.cloneNode(true) as HTMLElement;
+    ghost.style.width = `${th.offsetWidth}px`;
+    ghost.style.opacity = "0.85";
+    ghost.style.background = "hsl(var(--primary) / 0.08)";
+    ghost.style.border = "1.5px solid hsl(var(--primary) / 0.4)";
+    ghost.style.borderRadius = "6px";
+    ghost.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)";
+    ghost.style.position = "absolute";
+    ghost.style.top = "-9999px";
+    ghost.style.left = "-9999px";
+    document.body.appendChild(ghost);
+    e.dataTransfer.setDragImage(ghost, th.offsetWidth / 2, th.offsetHeight / 2);
+    requestAnimationFrame(() => document.body.removeChild(ghost));
   }, []);
 
   const handleDragOver = useCallback((e: React.DragEvent, colKey: string) => {
     e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
     if (colKey !== dragCol) {
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const midX = rect.left + rect.width / 2;
+      setDragSide(e.clientX < midX ? "left" : "right");
       setDragOverCol(colKey);
     }
   }, [dragCol]);
@@ -541,14 +561,15 @@ export default function ClaimsList() {
     setColumnOrder((prev) => {
       const next = [...prev];
       const fromIdx = next.indexOf(dragCol);
-      const toIdx = next.indexOf(targetKey);
       next.splice(fromIdx, 1);
-      next.splice(toIdx, 0, dragCol);
+      const toIdx = next.indexOf(targetKey);
+      const insertIdx = dragSide === "right" ? toIdx + 1 : toIdx;
+      next.splice(insertIdx, 0, dragCol);
       return next;
     });
     setDragCol(null);
     setDragOverCol(null);
-  }, [dragCol]);
+  }, [dragCol, dragSide]);
 
   const handleDragEnd = useCallback(() => {
     setDragCol(null);
@@ -650,15 +671,25 @@ export default function ClaimsList() {
                     <th
                       key={col.key}
                       draggable
-                      onDragStart={() => handleDragStart(col.key)}
+                      onDragStart={(e) => handleDragStart(e, col.key)}
                       onDragOver={(e) => handleDragOver(e, col.key)}
                       onDrop={() => handleDrop(col.key)}
                       onDragEnd={handleDragEnd}
-                      className={`relative text-left text-[11px] uppercase tracking-wider font-medium text-muted-foreground px-3 py-2 select-none transition-colors ${
-                        dragCol === col.key ? "opacity-50" : ""
-                      } ${dragOverCol === col.key ? "bg-primary/10 border-l-2 border-l-primary" : ""}`}
-                      style={{ width: columnWidths[col.key], minWidth: col.minWidth, cursor: "grab" }}
+                      onDragLeave={() => { if (dragOverCol === col.key) setDragOverCol(null); }}
+                      className={`relative text-left text-[11px] uppercase tracking-wider font-medium text-muted-foreground px-3 py-2 select-none transition-all duration-150 ${
+                        dragCol === col.key ? "opacity-30 scale-95" : ""
+                      } ${dragCol && dragCol !== col.key ? "hover:bg-muted/40" : ""}`}
+                      style={{ width: columnWidths[col.key], minWidth: col.minWidth, cursor: dragCol ? "grabbing" : "grab" }}
                     >
+                      {dragOverCol === col.key && dragCol !== col.key && (
+                        <div
+                          className="absolute top-0 bottom-0 w-[3px] bg-primary rounded-full z-30 transition-all duration-150"
+                          style={{ [dragSide]: "-1.5px" }}
+                        >
+                          <div className="absolute -top-[3px] left-1/2 -translate-x-1/2 w-[9px] h-[9px] rounded-full bg-primary" />
+                          <div className="absolute -bottom-[3px] left-1/2 -translate-x-1/2 w-[9px] h-[9px] rounded-full bg-primary" />
+                        </div>
+                      )}
                       <div className="flex items-center gap-0.5">
                         <button
                           className="flex items-center gap-0.5 hover:text-foreground transition-colors"
