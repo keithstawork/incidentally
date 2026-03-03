@@ -1,11 +1,13 @@
 import { useLocation, Link } from "wouter";
 import {
-  LayoutDashboard,
   FileText,
   Plus,
   LogOut,
   Shield,
   Upload,
+  Settings,
+  Home,
+  BarChart3,
 } from "lucide-react";
 import {
   Sidebar,
@@ -23,9 +25,13 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/hooks/use-auth";
 
 const navItems = [
-  { title: "Dashboard", url: "/", icon: LayoutDashboard },
-  { title: "All Claims", url: "/claims", icon: FileText },
-  { title: "New Claim", url: "/claims/new", icon: Plus },
+  { title: "User Home", url: "/", icon: Home },
+  { title: "All Incidents", url: "/claims", icon: FileText },
+  { title: "New Incident", url: "/claims/new", icon: Plus },
+  { title: "Data Insights", url: "/insights", icon: BarChart3 },
+];
+
+const bottomNavItems = [
   { title: "Import CSV", url: "/claims/import", icon: Upload },
 ];
 
@@ -45,7 +51,7 @@ export function AppSidebar() {
             <Shield className="h-4 w-4 text-primary-foreground" />
           </div>
           <div className="flex flex-col">
-            <span className="text-sm font-semibold tracking-tight"><span className="text-foreground">Incident</span><span className="text-primary">Ally</span></span>
+            <span className="text-sm font-semibold tracking-tight"><span className="text-foreground">Incident</span><span className="text-primary">ally</span></span>
             <span className="text-[10px] text-muted-foreground">Claims Simplified</span>
           </div>
         </div>
@@ -77,6 +83,41 @@ export function AppSidebar() {
                   </SidebarMenuItem>
                 );
               })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup className="mt-auto">
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {bottomNavItems.map((item) => {
+                const isActive = location.startsWith(item.url);
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton
+                      asChild
+                      data-active={isActive}
+                      className="data-[active=true]:bg-sidebar-accent"
+                    >
+                      <Link href={item.url} data-testid={`nav-${item.title.toLowerCase().replace(/\s/g, "-")}`}>
+                        <item.icon className="h-4 w-4" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  data-active={location === "/settings"}
+                  className="data-[active=true]:bg-sidebar-accent"
+                >
+                  <Link href="/settings" data-testid="nav-company-settings">
+                    <Settings className="h-4 w-4" />
+                    <span>Company Settings</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

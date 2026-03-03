@@ -10,7 +10,7 @@ export default function Landing() {
             <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
               <Shield className="h-4 w-4 text-primary-foreground" />
             </div>
-            <span className="font-semibold tracking-tight"><span className="text-foreground">Incident</span><span className="text-primary">Ally</span></span>
+            <span className="font-semibold tracking-tight"><span className="text-foreground">Incident</span><span className="text-primary">ally</span></span>
           </div>
           <Button asChild data-testid="button-login">
             <a href="/api/login">Sign In</a>
@@ -38,11 +38,11 @@ export default function Landing() {
               </div>
               <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
                 <span className="flex items-center gap-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#3B5747]" />
                   Internal tool
                 </span>
                 <span className="flex items-center gap-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#3B5747]" />
                   No setup required
                 </span>
               </div>
@@ -117,7 +117,7 @@ export default function Landing() {
 
       <footer className="border-t py-6">
         <div className="mx-auto max-w-6xl px-4 text-center text-xs text-muted-foreground">
-          IncidentAlly &mdash; Internal Workers' Compensation Claims Management
+          Instawork Incidentally &mdash; Claims Simplified
         </div>
       </footer>
     </div>

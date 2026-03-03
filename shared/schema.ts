@@ -11,6 +11,7 @@ import {
   decimal,
   timestamp,
   pgEnum,
+  index,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -65,6 +66,7 @@ export const userRoleEnum = pgEnum("user_role", [
 
 export const claims = pgTable("claims", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  matterNumber: varchar("matter_number", { length: 30 }),
   tpaClaimId: varchar("tpa_claim_id", { length: 100 }),
   firstName: varchar("first_name", { length: 100 }).notNull(),
   lastName: varchar("last_name", { length: 100 }).notNull(),
@@ -83,6 +85,10 @@ export const claims = pgTable("claims", {
   litigated: boolean("litigated").default(false),
 
   partnerName: varchar("partner_name", { length: 300 }).notNull(),
+  partnerState: varchar("partner_state", { length: 2 }),
+  shiftLocation: varchar("shift_location", { length: 500 }),
+  payRate: decimal("pay_rate", { precision: 8, scale: 2 }),
+  shiftLengthHours: decimal("shift_length_hours", { precision: 5, scale: 2 }),
   insuredName: varchar("insured_name", { length: 300 }),
   carrier: varchar("carrier", { length: 200 }),
   policyYear: varchar("policy_year", { length: 10 }),
@@ -146,7 +152,17 @@ export const claims = pgTable("claims", {
   sourceEmailId: varchar("source_email_id", { length: 200 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: varchar("deleted_by", { length: 100 }),
+  deleteReason: text("delete_reason"),
+}, (table) => ({
+  matterNumberIdx: index("claims_matter_number_idx").on(table.matterNumber),
+  deletedStatusIdx: index("claims_deleted_status_idx").on(table.deletedAt, table.claimStatus),
+  proIdIdx: index("claims_pro_id_idx").on(table.proId),
+  dateOfInjuryIdx: index("claims_doi_idx").on(table.dateOfInjury),
+  workerTypeIdx: index("claims_worker_type_idx").on(table.workerType),
+  stageIdx: index("claims_stage_idx").on(table.stage),
+}));
 
 export const claimNotes = pgTable("claim_notes", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
@@ -157,7 +173,9 @@ export const claimNotes = pgTable("claim_notes", {
   targetDate: date("target_date"),
   completed: boolean("completed").default(false),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  claimIdIdx: index("claim_notes_claim_id_idx").on(table.claimId),
+}));
 
 export const claimStatusHistory = pgTable("claim_status_history", {
   id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
@@ -169,7 +187,10 @@ export const claimStatusHistory = pgTable("claim_status_history", {
   changedBy: varchar("changed_by", { length: 100 }),
   changedAt: timestamp("changed_at").defaultNow(),
   reason: text("reason"),
-});
+  changes: text("changes"),
+}, (table) => ({
+  claimIdIdx: index("claim_history_claim_id_idx").on(table.claimId),
+}));
 
 export const claimsRelations = relations(claims, ({ many }) => ({
   notes: many(claimNotes),
@@ -186,6 +207,7 @@ export const claimStatusHistoryRelations = relations(claimStatusHistory, ({ one 
 
 export const insertClaimSchema = createInsertSchema(claims).omit({
   id: true,
+  matterNumber: true,
   createdAt: true,
   updatedAt: true,
 });
@@ -200,9 +222,98 @@ export const insertClaimStatusHistorySchema = createInsertSchema(claimStatusHist
   changedAt: true,
 });
 
+export const pros = pgTable("pros", {
+  proId: integer("pro_id").primaryKey(),
+  name: varchar("name", { length: 300 }),
+  givenName: varchar("given_name", { length: 300 }),
+  familyName: varchar("family_name", { length: 300 }),
+  email: varchar("email", { length: 300 }),
+  phone: varchar("phone", { length: 50 }),
+  address: varchar("address", { length: 300 }),
+  locality: varchar("locality", { length: 200 }),
+  state: varchar("state", { length: 200 }),
+  stateCode: varchar("state_code", { length: 10 }),
+  zipcode: varchar("zipcode", { length: 20 }),
+  workerStatus: varchar("worker_status", { length: 100 }),
+  workerLevel: varchar("worker_level", { length: 100 }),
+  w2Eligible: boolean("w2_eligible"),
+  w2Employer: varchar("w2_employer", { length: 300 }),
+  w2Status: integer("w2_status"),
+  backgroundCheckStatus: integer("background_check_status"),
+  noshowCount: integer("noshow_count"),
+  dateCreated: timestamp("date_created"),
+  lastActive: timestamp("last_active"),
+  syncedAt: timestamp("synced_at").defaultNow(),
+});
+
+export const proShifts = pgTable("pro_shifts", {
+  shiftId: integer("shift_id").primaryKey(),
+  proId: integer("pro_id").notNull(),
+  businessName: varchar("business_name", { length: 500 }),
+  position: varchar("position", { length: 200 }),
+  startsAt: timestamp("starts_at"),
+  endsAt: timestamp("ends_at"),
+  status: varchar("status", { length: 100 }),
+  regionName: varchar("region_name", { length: 300 }),
+  workerRegionName: varchar("worker_region_name", { length: 300 }),
+  subRegionName: varchar("sub_region_name", { length: 300 }),
+  zipcode: varchar("zipcode", { length: 20 }),
+  geocode: varchar("geocode", { length: 100 }),
+  shiftCity: varchar("shift_city", { length: 200 }),
+  shiftState: varchar("shift_state", { length: 2 }),
+  shiftAddress: varchar("shift_address", { length: 500 }),
+  isW2: boolean("is_w2"),
+  syncedAt: timestamp("synced_at").defaultNow(),
+}, (table) => ({
+  proStartsIdx: index("pro_shifts_pro_starts_idx").on(table.proId, table.startsAt),
+}));
+
+export const companyTypeEnum = pgEnum("company_type", ["parent", "subsidiary"]);
+export const policyStatusEnum = pgEnum("policy_status", ["Active", "Expired"]);
+
+export const companies = pgTable("companies", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: varchar("name", { length: 500 }).notNull(),
+  type: companyTypeEnum("type").notNull().default("subsidiary"),
+  parentId: integer("parent_id"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const insurancePolicies = pgTable("insurance_policies", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  carrierName: varchar("carrier_name", { length: 500 }).notNull(),
+  policyType: varchar("policy_type", { length: 200 }).notNull(),
+  policyNumber: varchar("policy_number", { length: 200 }),
+  policyYearStart: date("policy_year_start"),
+  policyYearEnd: date("policy_year_end"),
+  insuredParty: varchar("insured_party", { length: 500 }),
+  status: policyStatusEnum("status").notNull().default("Active"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const insertCompanySchema = createInsertSchema(companies).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertPolicySchema = createInsertSchema(insurancePolicies).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export type Claim = typeof claims.$inferSelect;
 export type InsertClaim = z.infer<typeof insertClaimSchema>;
 export type ClaimNote = typeof claimNotes.$inferSelect;
 export type InsertClaimNote = z.infer<typeof insertClaimNoteSchema>;
 export type ClaimStatusHistory = typeof claimStatusHistory.$inferSelect;
 export type InsertClaimStatusHistory = z.infer<typeof insertClaimStatusHistorySchema>;
+export type Pro = typeof pros.$inferSelect;
+export type InsertPro = typeof pros.$inferInsert;
+export type ProShift = typeof proShifts.$inferSelect;
+export type Company = typeof companies.$inferSelect;
+export type InsertCompany = z.infer<typeof insertCompanySchema>;
+export type InsurancePolicy = typeof insurancePolicies.$inferSelect;
+export type InsertPolicy = z.infer<typeof insertPolicySchema>;

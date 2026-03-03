@@ -1,7 +1,8 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { Link, useLocation } from "wouter";
 import {
   Search,
   Plus,
@@ -25,11 +26,11 @@ import { useToast } from "@/hooks/use-toast";
 import type { Claim } from "@shared/schema";
 
 const STATUS_BADGE_VARIANTS: Record<string, string> = {
-  Open: "bg-yellow-100 text-yellow-800 border-yellow-200",
-  Closed: "bg-green-100 text-green-800 border-green-200",
-  Denied: "bg-red-100 text-red-800 border-red-200",
-  "Incident Only": "bg-gray-100 text-gray-600 border-gray-200",
-  "Incident Report": "bg-gray-100 text-gray-500 border-gray-200",
+  Open: "bg-[#C4A27F]/15 text-[#76614C] border-[#C4A27F]/30",
+  Closed: "bg-[#3B5747]/15 text-[#23342B] border-[#3B5747]/30",
+  Denied: "bg-[#EC5A53]/15 text-[#8E3632] border-[#EC5A53]/30",
+  "Incident Only": "bg-[#576270]/10 text-[#576270] border-[#576270]/20",
+  "Incident Report": "bg-[#576270]/10 text-[#576270] border-[#576270]/20",
 };
 
 const STAGE_LABELS: Record<string, string> = {
@@ -41,11 +42,11 @@ const STAGE_LABELS: Record<string, string> = {
 };
 
 const STAGE_BADGE_VARIANTS: Record<string, string> = {
-  intake: "bg-blue-100 text-blue-700 border-blue-200",
-  active_claim: "bg-purple-100 text-purple-700 border-purple-200",
-  litigation: "bg-red-100 text-red-700 border-red-200",
-  settled: "bg-emerald-100 text-emerald-700 border-emerald-200",
-  closed: "bg-gray-100 text-gray-600 border-gray-200",
+  intake: "bg-[#294EB2]/15 text-[#192F6B] border-[#294EB2]/30",
+  active_claim: "bg-[#3B5747]/15 text-[#23342B] border-[#3B5747]/30",
+  litigation: "bg-[#EC5A53]/15 text-[#8E3632] border-[#EC5A53]/30",
+  settled: "bg-[#C4A27F]/15 text-[#76614C] border-[#C4A27F]/30",
+  closed: "bg-[#576270]/10 text-[#576270] border-[#576270]/20",
 };
 
 
@@ -75,22 +76,23 @@ interface ColumnDef {
   getValue: (claim: Claim) => string;
   render?: (claim: Claim) => React.ReactNode;
   filterable: boolean;
+  flex?: boolean;
 }
 
 const COLUMNS: ColumnDef[] = [
   {
-    key: "id",
-    label: "ID",
-    defaultWidth: 60,
-    minWidth: 45,
-    getValue: (c) => String(c.id),
+    key: "matterNumber",
+    label: "Incident No.",
+    defaultWidth: 160,
+    minWidth: 120,
+    getValue: (c) => (c as any).matterNumber || String(c.id),
     render: (c) => (
       <Link
         href={`/claims/${c.id}`}
-        className="text-primary underline-offset-2 hover:underline font-mono text-muted-foreground"
+        className="text-primary underline-offset-2 hover:underline"
         data-testid={`link-claim-${c.id}`}
       >
-        #{c.id}
+        {(c as any).matterNumber || `#${c.id}`}
       </Link>
     ),
     filterable: false,
@@ -107,19 +109,7 @@ const COLUMNS: ColumnDef[] = [
       </Link>
     ),
     filterable: false,
-  },
-  {
-    key: "tpaClaimId",
-    label: "TPA ID",
-    defaultWidth: 90,
-    minWidth: 60,
-    getValue: (c) => c.tpaClaimId || "TBD",
-    render: (c) => (
-      <span className="font-mono text-muted-foreground text-[11px]">
-        {c.tpaClaimId || "TBD"}
-      </span>
-    ),
-    filterable: false,
+    flex: true,
   },
   {
     key: "dateOfInjury",
@@ -131,22 +121,50 @@ const COLUMNS: ColumnDef[] = [
     filterable: false,
   },
   {
-    key: "age",
-    label: "Age",
-    defaultWidth: 50,
-    minWidth: 40,
-    getValue: (c) => claimAge(c.dateOfInjury),
-    render: (c) => <span className="text-muted-foreground">{claimAge(c.dateOfInjury)}</span>,
-    filterable: false,
-  },
-  {
     key: "workerType",
     label: "Type",
     defaultWidth: 55,
     minWidth: 45,
     getValue: (c) => c.workerType,
-    render: (c) => <span className="text-[10px] font-medium">{c.workerType}</span>,
+    render: (c) => <span className="font-medium">{c.workerType}</span>,
     filterable: true,
+  },
+  {
+    key: "stateOfInjury",
+    label: "ST",
+    defaultWidth: 45,
+    minWidth: 35,
+    getValue: (c) => c.stateOfInjury || "-",
+    render: (c) => <span className="text-center">{c.stateOfInjury || "-"}</span>,
+    filterable: true,
+  },
+  {
+    key: "partnerName",
+    label: "Partner",
+    defaultWidth: 160,
+    minWidth: 80,
+    getValue: (c) => c.partnerName,
+    render: (c) => (
+      <span className="truncate block" title={c.partnerName}>
+        {c.partnerName}
+      </span>
+    ),
+    filterable: true,
+    flex: true,
+  },
+  {
+    key: "injuryType",
+    label: "Injury",
+    defaultWidth: 120,
+    minWidth: 70,
+    getValue: (c) => c.injuryType || "-",
+    render: (c) => (
+      <span className="truncate block text-muted-foreground" title={c.injuryType || undefined}>
+        {c.injuryType || "-"}
+      </span>
+    ),
+    filterable: true,
+    flex: true,
   },
   {
     key: "claimStatus",
@@ -179,48 +197,23 @@ const COLUMNS: ColumnDef[] = [
     filterable: true,
   },
   {
-    key: "partnerName",
-    label: "Partner",
-    defaultWidth: 160,
-    minWidth: 80,
-    getValue: (c) => c.partnerName,
-    render: (c) => (
-      <span className="truncate block" title={c.partnerName}>
-        {c.partnerName}
-      </span>
-    ),
-    filterable: true,
-  },
-  {
-    key: "stateOfInjury",
-    label: "ST",
-    defaultWidth: 45,
-    minWidth: 35,
-    getValue: (c) => c.stateOfInjury || "-",
-    render: (c) => <span className="text-center font-mono">{c.stateOfInjury || "-"}</span>,
-    filterable: true,
-  },
-  {
-    key: "injuryType",
-    label: "Injury",
-    defaultWidth: 120,
-    minWidth: 70,
-    getValue: (c) => c.injuryType || "-",
-    render: (c) => (
-      <span className="truncate block text-muted-foreground" title={c.injuryType || undefined}>
-        {c.injuryType || "-"}
-      </span>
-    ),
-    filterable: true,
-  },
-  {
     key: "tnsSpecialist",
-    label: "T&S",
+    label: "T&S Agent",
     defaultWidth: 90,
     minWidth: 60,
     getValue: (c) => c.tnsSpecialist || "-",
     render: (c) => <span className="text-muted-foreground">{c.tnsSpecialist || "-"}</span>,
     filterable: true,
+    flex: true,
+  },
+  {
+    key: "age",
+    label: "Age",
+    defaultWidth: 50,
+    minWidth: 40,
+    getValue: (c) => claimAge(c.dateOfInjury),
+    render: (c) => <span className="text-muted-foreground">{claimAge(c.dateOfInjury)}</span>,
+    filterable: false,
   },
 ];
 
@@ -316,6 +309,7 @@ function ColumnFilterPopover({
 }
 
 export default function ClaimsList() {
+  const [, navigate] = useLocation();
   const [search, setSearch] = useState("");
   const [columnFilters, setColumnFilters] = useState<Record<string, Set<string>>>({});
   const [columnOrder, setColumnOrder] = useState<string[]>(() => COLUMNS.map((c) => c.key));
@@ -344,32 +338,8 @@ export default function ClaimsList() {
     startX: number;
     startWidth: number;
   } | null>(null);
-
-  useEffect(() => {
-    if (hasManuallyResized) return;
-    const container = tableContainerRef.current;
-    if (!container) return;
-
-    const fitColumns = () => {
-      const availableWidth = container.clientWidth;
-      const totalDefault = COLUMNS.reduce((sum, col) => sum + col.defaultWidth, 0);
-      if (availableWidth > totalDefault) {
-        const scale = availableWidth / totalDefault;
-        setColumnWidths((prev) => {
-          const scaled: Record<string, number> = { ...prev };
-          COLUMNS.forEach((col) => {
-            scaled[col.key] = Math.floor(col.defaultWidth * scale);
-          });
-          return scaled;
-        });
-      }
-    };
-
-    fitColumns();
-    const observer = new ResizeObserver(fitColumns);
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, [hasManuallyResized]);
+  const observerRef = useRef<ResizeObserver | null>(null);
+  const claimsRef = useRef<Claim[]>([]);
 
   const { toast } = useToast();
 
@@ -386,6 +356,77 @@ export default function ClaimsList() {
       return res.json();
     },
   });
+
+  claimsRef.current = allClaims;
+
+  const fitColumnsToContainer = useCallback(() => {
+    const container = tableContainerRef.current;
+    if (!container || hasManuallyResized) return;
+    const availableWidth = container.clientWidth;
+    if (availableWidth <= 0) return;
+
+    const data = claimsRef.current;
+    const CHAR_PX = 7;
+    const CELL_PAD = 28;
+
+    const contentWidths: Record<string, number> = {};
+    COLUMNS.forEach((col) => {
+      contentWidths[col.key] = col.label.length * 6 + CELL_PAD + 20;
+    });
+
+    const sample = data.slice(0, 80);
+    for (const claim of sample) {
+      for (const col of COLUMNS) {
+        const text = col.getValue(claim);
+        const w = text.length * CHAR_PX + CELL_PAD;
+        if (w > contentWidths[col.key]) contentWidths[col.key] = w;
+      }
+    }
+
+    COLUMNS.forEach((col) => {
+      contentWidths[col.key] = Math.max(col.minWidth, Math.min(contentWidths[col.key], col.defaultWidth));
+    });
+
+    const totalContent = COLUMNS.reduce((s, c) => s + contentWidths[c.key], 0);
+    const extra = Math.max(0, availableWidth - totalContent);
+    const perCol = Math.floor(extra / COLUMNS.length);
+
+    const result: Record<string, number> = {};
+    let allocated = 0;
+
+    COLUMNS.forEach((col, i) => {
+      if (i === COLUMNS.length - 1) {
+        result[col.key] = Math.max(col.minWidth, availableWidth - allocated);
+      } else {
+        const w = contentWidths[col.key] + perCol;
+        result[col.key] = w;
+        allocated += w;
+      }
+    });
+
+    setColumnWidths(result);
+  }, [hasManuallyResized]);
+
+  const tableContainerCallbackRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      if (observerRef.current) {
+        observerRef.current.disconnect();
+        observerRef.current = null;
+      }
+      (tableContainerRef as React.MutableRefObject<HTMLDivElement | null>).current = node;
+      if (node && !hasManuallyResized) {
+        fitColumnsToContainer();
+        const observer = new ResizeObserver(fitColumnsToContainer);
+        observer.observe(node);
+        observerRef.current = observer;
+      }
+    },
+    [hasManuallyResized, fitColumnsToContainer]
+  );
+
+  useEffect(() => {
+    if (allClaims.length > 0) fitColumnsToContainer();
+  }, [allClaims.length, fitColumnsToContainer]);
 
   const claims = useMemo(() => {
     let filtered = allClaims;
@@ -503,11 +544,11 @@ export default function ClaimsList() {
   const handleExportCsv = () => {
     if (!claims.length) return;
     const headers = [
-      "ID", "TPA Claim ID", "First Name", "Last Name", "Date of Injury",
+      "Incident No.", "TPA Claim ID", "First Name", "Last Name", "Date of Injury",
       "Worker Type", "Status", "Stage", "Partner", "State", "Injury Type",
     ];
     const rows = claims.map((c) => [
-      c.id, c.tpaClaimId || "", c.firstName, c.lastName, c.dateOfInjury,
+      (c as any).matterNumber || c.id, c.tpaClaimId || "", c.firstName, c.lastName, c.dateOfInjury,
       c.workerType, c.claimStatus || "", c.stage, c.partnerName,
       c.stateOfInjury || "", c.injuryType || "",
     ]);
@@ -610,16 +651,24 @@ export default function ClaimsList() {
 
   const activeColumnFilterCount = Object.values(columnFilters).filter((s) => s.size > 0).length;
 
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const rowVirtualizer = useVirtualizer({
+    count: claims.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: () => 36,
+    overscan: 20,
+  });
+
   return (
     <div className="flex flex-col h-full">
       <div className="border-b bg-background px-6 py-4 space-y-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div>
             <h1 className="text-xl font-semibold tracking-tight" data-testid="text-claims-title">
-              Claims
+              Incidents
             </h1>
             <p className="text-sm text-muted-foreground">
-              {claims.length} {claims.length === 1 ? "claim" : "claims"}
+              {claims.length} {claims.length === 1 ? "incident" : "incidents"}
               {activeColumnFilterCount > 0 &&
                 ` · ${activeColumnFilterCount} column filter${activeColumnFilterCount > 1 ? "s" : ""}`}
             </p>
@@ -638,7 +687,7 @@ export default function ClaimsList() {
             <Button size="sm" asChild data-testid="button-new-claim-list">
               <Link href="/claims/new">
                 <Plus className="mr-1.5 h-3.5 w-3.5" />
-                New Claim
+                New Incident
               </Link>
             </Button>
           </div>
@@ -648,7 +697,7 @@ export default function ClaimsList() {
           <div className="relative flex-1 max-w-xs">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input
-              placeholder="Search claims..."
+              placeholder="Search incidents..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-8 h-8 text-sm"
@@ -671,7 +720,7 @@ export default function ClaimsList() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-hidden" ref={tableContainerCallbackRef}>
         {isLoading ? (
           <div className="p-6 space-y-2">
             {Array.from({ length: 10 }).map((_, i) => (
@@ -683,20 +732,25 @@ export default function ClaimsList() {
             <div className="rounded-full bg-muted p-4 mb-4">
               <Search className="h-6 w-6 text-muted-foreground" />
             </div>
-            <h3 className="text-sm font-medium">No claims found</h3>
+            <h3 className="text-sm font-medium">No incidents found</h3>
             <p className="text-xs text-muted-foreground mt-1 max-w-xs">
-              Create your first claim to get started.
+              Create your first incident to get started.
             </p>
             <Button size="sm" asChild className="mt-4" data-testid="button-empty-new-claim">
               <Link href="/claims/new">
                 <Plus className="mr-1.5 h-3.5 w-3.5" />
-                New Claim
+                New Incident
               </Link>
             </Button>
           </div>
         ) : (
-          <div ref={tableContainerRef} className="overflow-x-auto scrollbar-visible">
-            <table ref={tableRef} className="text-xs" style={{ minWidth: Object.values(columnWidths).reduce((a, b) => a + b, 0) + "px" }}>
+          <div ref={scrollContainerRef} className="overflow-auto h-full scrollbar-visible">
+            <table ref={tableRef} className="text-xs w-full" style={{ tableLayout: "fixed", minWidth: COLUMNS.reduce((sum, col) => sum + col.minWidth, 0) + "px" }}>
+              <colgroup>
+                {orderedColumns.map((col) => (
+                  <col key={col.key} style={{ width: columnWidths[col.key] }} />
+                ))}
+              </colgroup>
               <thead className="sticky top-0 z-10 bg-muted/50 backdrop-blur-sm">
                 <tr className="border-b">
                   {orderedColumns.map((col) => (
@@ -745,11 +799,16 @@ export default function ClaimsList() {
                           />
                         )}
                       </div>
-                      <div
-                        className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 z-20"
-                        onMouseDown={(e) => handleResizeStart(e, col.key)}
-                        data-testid={`resize-${col.key}`}
-                      />
+                      {col.key !== COLUMNS[COLUMNS.length - 1].key && (
+                        <div
+                          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize z-20"
+                          style={{ backgroundColor: "hsl(var(--primary) / 0.1)" }}
+                          onMouseDown={(e) => handleResizeStart(e, col.key)}
+                          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "hsl(var(--primary) / 0.35)")}
+                          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "hsl(var(--primary) / 0.1)")}
+                          data-testid={`resize-${col.key}`}
+                        />
+                      )}
                     </th>
                   ))}
                 </tr>
@@ -771,29 +830,39 @@ export default function ClaimsList() {
                     </td>
                   </tr>
                 ) : (
-                  claims.map((claim) => (
-                    <tr
-                      key={claim.id}
-                      className="border-b border-border/50 hover:bg-muted/30 transition-colors cursor-pointer"
-                      data-testid={`row-claim-${claim.id}`}
-                    >
-                      {orderedColumns.map((col) => (
-                        <td
-                          key={col.key}
-                          className={`px-3 py-2 overflow-hidden transition-opacity duration-200 ${
-                            dragCol === col.key ? "opacity-20" : ""
-                          }`}
-                          style={{
-                            width: columnWidths[col.key],
-                            maxWidth: columnWidths[col.key],
-                            minWidth: col.minWidth,
-                          }}
+                  <>
+                    <tr style={{ height: rowVirtualizer.getVirtualItems()[0]?.start ?? 0 }} />
+                    {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                      const claim = claims[virtualRow.index];
+                      return (
+                        <tr
+                          key={claim.id}
+                          className="border-b border-border/50 hover:bg-muted/30 transition-colors cursor-pointer"
+                          data-testid={`row-claim-${claim.id}`}
+                          ref={rowVirtualizer.measureElement}
+                          data-index={virtualRow.index}
+                          onClick={() => navigate(`/claims/${claim.id}`)}
                         >
-                          {col.render ? col.render(claim) : col.getValue(claim)}
-                        </td>
-                      ))}
-                    </tr>
-                  ))
+                          {orderedColumns.map((col) => (
+                            <td
+                              key={col.key}
+                              className={`px-3 py-2 overflow-hidden transition-opacity duration-200 ${
+                                dragCol === col.key ? "opacity-20" : ""
+                              }`}
+                              style={{
+                                width: columnWidths[col.key],
+                                maxWidth: columnWidths[col.key],
+                                minWidth: col.minWidth,
+                              }}
+                            >
+                              {col.render ? col.render(claim) : col.getValue(claim)}
+                            </td>
+                          ))}
+                        </tr>
+                      );
+                    })}
+                    <tr style={{ height: rowVirtualizer.getTotalSize() - (rowVirtualizer.getVirtualItems().at(-1)?.end ?? 0) }} />
+                  </>
                 )}
               </tbody>
             </table>

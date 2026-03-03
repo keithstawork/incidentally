@@ -8,12 +8,46 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { useAuth } from "@/hooks/use-auth";
 import NotFound from "@/pages/not-found";
 import Landing from "@/pages/landing";
+import UserHome from "@/pages/user-home";
 import Dashboard from "@/pages/dashboard";
 import ClaimsList from "@/pages/claims-list";
 import ClaimDetail from "@/pages/claim-detail";
 import ClaimNew from "@/pages/claim-new";
 import CsvImport from "@/pages/csv-import";
+import CompanySettings from "@/pages/company-settings";
 import { Skeleton } from "@/components/ui/skeleton";
+import React from "react";
+
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  state = { hasError: false, error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex items-center justify-center h-screen">
+          <div className="text-center space-y-4 max-w-md px-6">
+            <h1 className="text-xl font-semibold">Something went wrong</h1>
+            <p className="text-sm text-muted-foreground">{this.state.error?.message}</p>
+            <button
+              onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
+              className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
+            >
+              Reload
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function AuthenticatedApp() {
   const style = {
@@ -31,11 +65,13 @@ function AuthenticatedApp() {
           </header>
           <main className="flex-1 overflow-hidden">
             <Switch>
-              <Route path="/" component={Dashboard} />
+              <Route path="/" component={UserHome} />
+              <Route path="/insights" component={Dashboard} />
               <Route path="/claims" component={ClaimsList} />
               <Route path="/claims/new" component={ClaimNew} />
               <Route path="/claims/import" component={CsvImport} />
               <Route path="/claims/:id" component={ClaimDetail} />
+              <Route path="/settings" component={CompanySettings} />
               <Route component={NotFound} />
             </Switch>
           </main>
@@ -70,8 +106,10 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <Toaster />
-        <Router />
+        <ErrorBoundary>
+          <Toaster />
+          <Router />
+        </ErrorBoundary>
       </TooltipProvider>
     </QueryClientProvider>
   );

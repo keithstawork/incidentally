@@ -16,6 +16,8 @@ import {
   ClipboardList,
   Briefcase,
   MessageSquare,
+  Trash2,
+  GitMerge,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +29,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -35,10 +47,15 @@ import {
 } from "@/components/ui/select";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Claim, ClaimNote, ClaimStatusHistory } from "@shared/schema";
+import type { Claim, ClaimNote, ClaimStatusHistory, Pro } from "@shared/schema";
 
 const STAGES = ["intake", "active_claim", "litigation", "settled", "closed"] as const;
-const STATUSES = ["Open", "Closed", "Denied", "Incident Only", "Incident Report"] as const;
+const STATUSES = ["Closed", "Denied", "Incident Only", "Incident Report", "Open"] as const;
+const INJURY_TYPES = [
+  "Burn", "Chemical Exposure", "Contusion", "Cut/Laceration",
+  "Fall/Slip/Trip", "Falling Object", "Motor Vehicle Accident",
+  "Strain: Lifting", "Strain: Repetitive movement", "Other",
+];
 const STAGE_LABELS: Record<string, string> = {
   intake: "Intake",
   active_claim: "Active Claim",
@@ -47,14 +64,29 @@ const STAGE_LABELS: Record<string, string> = {
   closed: "Closed",
 };
 const NOTE_TYPE_LABELS: Record<string, string> = {
-  update: "Update",
   action_item_adjuster: "Action Item - Adjuster",
   action_item_aws: "Action Item - AWS",
   action_item_legal: "Action Item - Legal",
-  general_note: "General Note",
   email_thread: "Email Thread",
+  general_note: "General Note",
   status_change: "Status Change",
+  update: "Update",
 };
+
+function formatFieldName(field: string): string {
+  const labels: Record<string, string> = {
+    firstName: "First Name", lastName: "Last Name", proId: "Pro ID",
+    dateOfInjury: "Date of Injury", dateSubmitted: "Date Submitted",
+    dateEmployerNotified: "Employer Notified", dateClosed: "Date Closed",
+    workerType: "Shift Type", claimType: "Claim Type", claimStatus: "Status",
+    injuryType: "Injury Type", stateOfInjury: "State", shiftType: "Shift Position",
+    partnerName: "Partner", partnerState: "Partner State",
+    shiftLocation: "Shift Location", insuredName: "Insured",
+    carrier: "Carrier", policyYear: "Policy Year", stage: "Stage",
+    litigated: "Litigated", tnsSpecialist: "T&S Specialist",
+  };
+  return labels[field] || field.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase()).trim();
+}
 
 function formatDate(date: string | null | undefined): string {
   if (!date) return "-";
@@ -100,6 +132,34 @@ function FieldRow({
   );
 }
 
+function useProData(proId: string | null | undefined) {
+  return useQuery<Pro>({
+    queryKey: ["/api/pros", proId],
+    queryFn: async () => {
+      const res = await fetch(`/api/pros/${proId}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Pro not found");
+      return res.json();
+    },
+    enabled: !!proId && /^\d+$/.test(proId),
+    retry: false,
+  });
+}
+
+function ProStatusBadge({ status }: { status: string | null | undefined }) {
+  if (!status) return null;
+  const s = status.toLowerCase();
+  const color = s === "active"
+    ? "bg-[#3B5747]/15 text-[#3B5747] dark:bg-[#3B5747]/25 dark:text-[#B1BCB5]"
+    : s === "suspended"
+      ? "bg-[#C4A27F]/15 text-[#76614C] dark:bg-[#C4A27F]/25 dark:text-[#E7DACC]"
+      : "bg-[#EC5A53]/15 text-[#8E3632] dark:bg-[#EC5A53]/25 dark:text-[#F7A9A9]";
+  return (
+    <span className={`text-[10px] font-medium uppercase tracking-wider px-2 py-0.5 rounded-full ${color}`}>
+      {status}
+    </span>
+  );
+}
+
 export default function ClaimDetail() {
   const { id } = useParams<{ id: string }>();
   const [, navigate] = useLocation();
@@ -109,6 +169,14 @@ export default function ClaimDetail() {
   const [newNoteContent, setNewNoteContent] = useState("");
   const [newNoteType, setNewNoteType] = useState("general_note");
   const [newNoteAuthor, setNewNoteAuthor] = useState("");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteConfirmStep, setDeleteConfirmStep] = useState(0);
+  const [deleteReason, setDeleteReason] = useState("");
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+  const [mergeOtherId, setMergeOtherId] = useState("");
+  const [mergeOtherClaim, setMergeOtherClaim] = useState<Claim | null>(null);
+  const [mergeResolved, setMergeResolved] = useState<Record<string, "primary" | "secondary">>({});
+  const [mergeLoading, setMergeLoading] = useState(false);
 
   const { data: claim, isLoading } = useQuery<Claim>({
     queryKey: ["/api/claims", id],
@@ -120,6 +188,27 @@ export default function ClaimDetail() {
 
   const { data: history = [] } = useQuery<ClaimStatusHistory[]>({
     queryKey: ["/api/claims", id, "history"],
+  });
+
+  const { data: pro } = useProData(claim?.proId);
+
+  const { data: applicablePolicy } = useQuery<{
+    policy: any | null;
+    coverageType: string;
+    coverageNote: string;
+  }>({
+    queryKey: ["/api/policies/applicable", claim?.workerType, claim?.dateOfInjury, claim?.litigated],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        workerType: claim!.workerType,
+        dateOfInjury: claim!.dateOfInjury,
+        litigated: String(claim!.litigated ?? false),
+      });
+      const res = await fetch(`/api/policies/applicable?${params}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      return res.json();
+    },
+    enabled: !!claim?.workerType && !!claim?.dateOfInjury,
   });
 
   const updateMutation = useMutation({
@@ -136,6 +225,108 @@ export default function ClaimDetail() {
     },
     onError: () => toast({ title: "Error updating claim", variant: "destructive" }),
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (reason: string) => {
+      const res = await apiRequest("DELETE", `/api/claims/${id}`, { reason });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/claims", "list"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      toast({ title: "Claim deleted" });
+      navigate("/claims");
+    },
+    onError: () => toast({ title: "Error deleting claim", variant: "destructive" }),
+  });
+
+  const mergeMutation = useMutation({
+    mutationFn: async ({ primaryId, secondaryId, resolvedFields }: { primaryId: number; secondaryId: number; resolvedFields: Record<string, any> }) => {
+      const res = await apiRequest("POST", "/api/claims/merge", { primaryId, secondaryId, resolvedFields });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/claims", id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/claims", id, "notes"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/claims", id, "history"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/claims", "list"] });
+      toast({ title: "Claims merged successfully" });
+      setMergeDialogOpen(false);
+      setMergeOtherClaim(null);
+      setMergeOtherId("");
+      setMergeResolved({});
+    },
+    onError: () => toast({ title: "Error merging claims", variant: "destructive" }),
+  });
+
+  const MERGE_FIELDS: { key: string; label: string }[] = [
+    { key: "firstName", label: "First Name" },
+    { key: "lastName", label: "Last Name" },
+    { key: "tpaClaimId", label: "Claim Number" },
+    { key: "workerType", label: "Worker Type" },
+    { key: "claimType", label: "Claim Type" },
+    { key: "claimStatus", label: "Status" },
+    { key: "stage", label: "Stage" },
+    { key: "injuryType", label: "Injury Type" },
+    { key: "stateOfInjury", label: "State of Injury" },
+    { key: "shiftType", label: "Shift Type" },
+    { key: "partnerName", label: "Partner" },
+    { key: "partnerState", label: "Partner State" },
+    { key: "shiftLocation", label: "Shift Location" },
+    { key: "dateSubmitted", label: "Date Submitted" },
+    { key: "adjuster", label: "Adjuster" },
+    { key: "tnsSpecialist", label: "T&S Specialist" },
+    { key: "litigated", label: "Litigated" },
+    { key: "carrier", label: "Carrier" },
+    { key: "policyNumber", label: "Policy #" },
+    { key: "policyYear", label: "Policy Year" },
+    { key: "insuredName", label: "Insured" },
+    { key: "reportNumber", label: "Report Number" },
+    { key: "notes", label: "Notes" },
+    { key: "litigationNotes", label: "Litigation Notes" },
+  ];
+
+  const fetchMergeCandidate = async () => {
+    if (!mergeOtherId.trim()) return;
+    setMergeLoading(true);
+    try {
+      const res = await fetch(`/api/claims/${mergeOtherId.trim()}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Not found");
+      const other = await res.json();
+      setMergeOtherClaim(other);
+      const defaults: Record<string, "primary" | "secondary"> = {};
+      MERGE_FIELDS.forEach(({ key }) => {
+        const pVal = (claim as any)?.[key];
+        const sVal = (other as any)?.[key];
+        if (String(pVal ?? "") !== String(sVal ?? "")) {
+          defaults[key] = pVal ? "primary" : "secondary";
+        }
+      });
+      setMergeResolved(defaults);
+    } catch {
+      toast({ title: "Claim not found", variant: "destructive" });
+      setMergeOtherClaim(null);
+    } finally {
+      setMergeLoading(false);
+    }
+  };
+
+  const executeMerge = () => {
+    if (!claim || !mergeOtherClaim) return;
+    const resolvedFields: Record<string, any> = {};
+    MERGE_FIELDS.forEach(({ key }) => {
+      const pVal = (claim as any)[key];
+      const sVal = (mergeOtherClaim as any)[key];
+      if (String(pVal ?? "") !== String(sVal ?? "")) {
+        const choice = mergeResolved[key] || "primary";
+        resolvedFields[key] = choice === "primary" ? pVal : sVal;
+      }
+    });
+    if (claim.notes && mergeOtherClaim.notes && mergeResolved["notes"] !== "secondary") {
+      resolvedFields.notes = `${claim.notes}\n\n--- Merged from incident ${(mergeOtherClaim as any).matterNumber || `#${mergeOtherClaim.id}`} ---\n${mergeOtherClaim.notes}`;
+    }
+    mergeMutation.mutate({ primaryId: claim.id, secondaryId: mergeOtherClaim.id, resolvedFields });
+  };
 
   const addNoteMutation = useMutation({
     mutationFn: async (data: any) => {
@@ -175,7 +366,7 @@ export default function ClaimDetail() {
         <AlertTriangle className="h-8 w-8 text-muted-foreground mb-3" />
         <p className="text-sm font-medium">Claim not found</p>
         <Button size="sm" variant="outline" asChild className="mt-3">
-          <Link href="/claims">Back to Claims</Link>
+          <Link href="/claims">Back to Incidents</Link>
         </Button>
       </div>
     );
@@ -241,7 +432,7 @@ export default function ClaimDetail() {
                 {claim.firstName} {claim.lastName}
               </h1>
               <span className="text-xs text-muted-foreground font-mono">
-                #{claim.id}
+                {(claim as any).matterNumber || `#${claim.id}`}
               </span>
               {claim.tpaClaimId && (
                 <span className="text-xs text-muted-foreground font-mono">
@@ -251,24 +442,24 @@ export default function ClaimDetail() {
             </div>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
               <span className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${
-                claim.claimStatus === "Open" ? "bg-yellow-100 text-yellow-800 border-yellow-200" :
-                claim.claimStatus === "Closed" ? "bg-green-100 text-green-800 border-green-200" :
-                claim.claimStatus === "Denied" ? "bg-red-100 text-red-800 border-red-200" :
-                "bg-gray-100 text-gray-600 border-gray-200"
+                claim.claimStatus === "Open" ? "bg-[#C4A27F]/15 text-[#76614C] border-[#C4A27F]/30" :
+                claim.claimStatus === "Closed" ? "bg-[#3B5747]/15 text-[#23342B] border-[#3B5747]/30" :
+                claim.claimStatus === "Denied" ? "bg-[#EC5A53]/15 text-[#8E3632] border-[#EC5A53]/30" :
+                "bg-[#576270]/10 text-[#576270] border-[#576270]/20"
               }`}>
                 {claim.claimStatus}
               </span>
               <span className={`inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium ${
-                claim.stage === "intake" ? "bg-blue-100 text-blue-700 border-blue-200" :
-                claim.stage === "litigation" ? "bg-red-100 text-red-700 border-red-200" :
-                claim.stage === "active_claim" ? "bg-purple-100 text-purple-700 border-purple-200" :
-                claim.stage === "settled" ? "bg-emerald-100 text-emerald-700 border-emerald-200" :
-                "bg-gray-100 text-gray-600 border-gray-200"
+                claim.stage === "intake" ? "bg-[#294EB2]/15 text-[#192F6B] border-[#294EB2]/30" :
+                claim.stage === "litigation" ? "bg-[#EC5A53]/15 text-[#8E3632] border-[#EC5A53]/30" :
+                claim.stage === "active_claim" ? "bg-[#3B5747]/15 text-[#23342B] border-[#3B5747]/30" :
+                claim.stage === "settled" ? "bg-[#C4A27F]/15 text-[#76614C] border-[#C4A27F]/30" :
+                "bg-[#576270]/10 text-[#576270] border-[#576270]/20"
               }`}>
                 {STAGE_LABELS[claim.stage]}
               </span>
               {claim.litigated && (
-                <span className="inline-flex items-center gap-1 text-[10px] text-red-600">
+                <span className="inline-flex items-center gap-1 text-[10px] text-[#EC5A53]">
                   <Scale className="h-3 w-3" /> Litigated
                 </span>
               )}
@@ -332,9 +523,159 @@ export default function ClaimDetail() {
                 </Button>
               </div>
             )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setMergeDialogOpen(true); setMergeOtherClaim(null); setMergeOtherId(""); }}
+              title="Merge with another claim"
+            >
+              <GitMerge className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+              onClick={() => { setDeleteDialogOpen(true); setDeleteConfirmStep(0); setDeleteReason(""); }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
           </div>
         </div>
       </div>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deleteConfirmStep === 0 ? "Delete this claim?" : "Confirm deletion"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteConfirmStep === 0 ? (
+                <>This will remove incident {(claim as any).matterNumber || `#${claim.id}`} ({claim.firstName} {claim.lastName}) from all views. The record will be preserved for audit purposes.</>
+              ) : (
+                <>Please provide a reason for deleting this claim. This will be recorded in the claim history.</>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteConfirmStep === 1 && (
+            <div className="py-2">
+              <Textarea
+                placeholder="Reason for deletion (e.g., duplicate claim, entered in error...)"
+                value={deleteReason}
+                onChange={(e) => setDeleteReason(e.target.value)}
+                className="text-sm"
+                rows={3}
+                autoFocus
+              />
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => { setDeleteConfirmStep(0); setDeleteReason(""); }}>
+              Cancel
+            </AlertDialogCancel>
+            {deleteConfirmStep === 0 ? (
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={(e) => { e.preventDefault(); setDeleteConfirmStep(1); }}
+              >
+                Yes, delete this claim
+              </AlertDialogAction>
+            ) : (
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                disabled={!deleteReason.trim() || deleteMutation.isPending}
+                onClick={() => deleteMutation.mutate(deleteReason.trim())}
+              >
+                {deleteMutation.isPending ? "Deleting..." : "Confirm deletion"}
+              </AlertDialogAction>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={mergeDialogOpen} onOpenChange={(open) => { setMergeDialogOpen(open); if (!open) { setMergeOtherClaim(null); setMergeOtherId(""); setMergeResolved({}); } }}>
+        <AlertDialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Merge Claims</AlertDialogTitle>
+            <AlertDialogDescription>
+              Merge another incident into this one ({(claim as any).matterNumber || `#${claim.id}`}). The other incident will be soft-deleted and its notes/history transferred here.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {!mergeOtherClaim ? (
+            <div className="flex gap-2 py-2">
+              <Input
+                placeholder="Enter claim ID to merge..."
+                value={mergeOtherId}
+                onChange={(e) => setMergeOtherId(e.target.value)}
+                className="text-sm"
+                onKeyDown={(e) => e.key === "Enter" && fetchMergeCandidate()}
+              />
+              <Button size="sm" onClick={fetchMergeCandidate} disabled={mergeLoading || !mergeOtherId.trim()}>
+                {mergeLoading ? "Loading..." : "Find"}
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3 py-2">
+              <div className="grid grid-cols-[1fr,auto,1fr] gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground px-1">
+                <span>This Claim ({(claim as any).matterNumber || `#${claim.id}`})</span>
+                <span className="w-16 text-center">Keep</span>
+                <span>Other ({(mergeOtherClaim as any).matterNumber || `#${mergeOtherClaim.id}`})</span>
+              </div>
+              <div className="space-y-0.5 max-h-[50vh] overflow-y-auto">
+                {MERGE_FIELDS.filter(({ key }) => {
+                  const pVal = String((claim as any)[key] ?? "");
+                  const sVal = String((mergeOtherClaim as any)[key] ?? "");
+                  return pVal !== sVal;
+                }).map(({ key, label }) => {
+                  const pVal = (claim as any)[key];
+                  const sVal = (mergeOtherClaim as any)[key];
+                  const choice = mergeResolved[key] || "primary";
+                  const fmtVal = (v: any) => v === true ? "Yes" : v === false ? "No" : v || <span className="text-muted-foreground italic">empty</span>;
+                  return (
+                    <div key={key} className="grid grid-cols-[1fr,auto,1fr] gap-1 items-center rounded px-1 py-1 hover:bg-muted/30">
+                      <button
+                        className={`text-left text-xs p-1 rounded border ${choice === "primary" ? "border-primary bg-primary/5 font-medium" : "border-transparent"}`}
+                        onClick={() => setMergeResolved((p) => ({ ...p, [key]: "primary" }))}
+                      >
+                        <span className="text-[10px] text-muted-foreground block">{label}</span>
+                        {fmtVal(pVal)}
+                      </button>
+                      <div className="w-16 flex justify-center">
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${choice === "primary" ? "bg-primary/10 text-primary" : "bg-[#C4A27F]/15 text-[#76614C]"}`}>
+                          {choice === "primary" ? "←" : "→"}
+                        </span>
+                      </div>
+                      <button
+                        className={`text-left text-xs p-1 rounded border ${choice === "secondary" ? "border-[#C4A27F] bg-[#C4A27F]/10 font-medium" : "border-transparent"}`}
+                        onClick={() => setMergeResolved((p) => ({ ...p, [key]: "secondary" }))}
+                      >
+                        <span className="text-[10px] text-muted-foreground block">{label}</span>
+                        {fmtVal(sVal)}
+                      </button>
+                    </div>
+                  );
+                })}
+                {MERGE_FIELDS.filter(({ key }) => String((claim as any)[key] ?? "") !== String((mergeOtherClaim as any)[key] ?? "")).length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-4">No differing fields — claims are identical.</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            {mergeOtherClaim && (
+              <AlertDialogAction
+                onClick={executeMerge}
+                disabled={mergeMutation.isPending}
+              >
+                {mergeMutation.isPending ? "Merging..." : `Merge ${(mergeOtherClaim as any).matterNumber || `#${mergeOtherClaim.id}`} into ${(claim as any).matterNumber || `#${claim.id}`}`}
+              </AlertDialogAction>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <div className="flex-1 overflow-auto p-6">
         <Tabs defaultValue="overview" className="space-y-4">
@@ -360,9 +701,12 @@ export default function ClaimDetail() {
             <div className="grid gap-4 lg:grid-cols-2">
               <Card>
                 <CardHeader className="p-4 pb-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Identity & Basics
-                  </h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Pro Details
+                    </h3>
+                    <ProStatusBadge status={pro?.workerStatus} />
+                  </div>
                 </CardHeader>
                 <CardContent className="px-4 pb-4 space-y-0.5">
                   <FieldRow label="First Name">
@@ -375,34 +719,96 @@ export default function ClaimDetail() {
                       <Input className="h-7 text-xs" value={getEditValue("lastName")} onChange={(e) => setEditValue("lastName", e.target.value)} />
                     ) : claim.lastName}
                   </FieldRow>
-                  <FieldRow label="Pro ID">{claim.proId || "-"}</FieldRow>
-                  <FieldRow label="Date of Injury">{formatDate(claim.dateOfInjury)}</FieldRow>
-                  <FieldRow label="Date Submitted">{formatDate(claim.dateSubmitted)}</FieldRow>
-                  <FieldRow label="Employer Notified">{formatDate(claim.dateEmployerNotified)}</FieldRow>
-                  <FieldRow label="Date Closed">{formatDate(claim.dateClosed)}</FieldRow>
+                  <FieldRow label="Pro ID">
+                    {claim.proId ? (
+                      <a href={`https://admin.instawork.com/internal/falcon/${claim.proId}/`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-primary underline-offset-2 hover:underline">
+                        <ExternalLink className="h-3 w-3" /> {claim.proId}
+                      </a>
+                    ) : "-"}
+                  </FieldRow>
+                  <FieldRow label="Email">{pro?.email || "-"}</FieldRow>
+                  <FieldRow label="Phone">{pro?.phone || "-"}</FieldRow>
+                  <FieldRow label="Address">{pro?.address || "-"}</FieldRow>
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader className="p-4 pb-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Classification
+                    Shift Details
                   </h3>
                 </CardHeader>
                 <CardContent className="px-4 pb-4 space-y-0.5">
-                  <FieldRow label="Worker Type">{claim.workerType}</FieldRow>
-                  <FieldRow label="Claim Type">
-                    {isEditing ? (
-                      <Select value={getEditValue("claimType") || ""} onValueChange={(v) => setEditValue("claimType", v)}>
-                        <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {["Medical Only", "Other Than Medical Only", "Incident Only", "Incident Only W2", "Incident Only 1099", "Pending"].map((t) => (
-                            <SelectItem key={t} value={t}>{t}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : claim.claimType || "-"}
+                  <FieldRow label="Partner">{claim.partnerName || "-"}</FieldRow>
+                  <FieldRow label="Partner Address">{claim.shiftLocation || "-"}</FieldRow>
+                  <FieldRow label="Shift ID">
+                    {claim.shiftLink ? (() => {
+                      const m = claim.shiftLink!.match(/\/shift\/([^/]+)/);
+                      const shiftId = m ? m[1] : null;
+                      return (
+                        <a href={claim.shiftLink!} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-primary underline-offset-2 hover:underline">
+                          <ExternalLink className="h-3 w-3" /> {shiftId || "View shift"}
+                        </a>
+                      );
+                    })() : "-"}
                   </FieldRow>
+                  <FieldRow label="Shift Type">{claim.workerType || "-"}</FieldRow>
+                  <FieldRow label="Position">{claim.shiftType || "-"}</FieldRow>
+                  <FieldRow label="Pay Rate">{claim.payRate ? `$${parseFloat(claim.payRate).toFixed(2)}/hr` : "-"}</FieldRow>
+                  <FieldRow label="Shift Length">{claim.shiftLengthHours ? `${parseFloat(claim.shiftLengthHours).toFixed(1)} hrs` : "-"}</FieldRow>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="p-4 pb-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Insurance Details
+                  </h3>
+                </CardHeader>
+                <CardContent className="px-4 pb-4 space-y-0.5">
+                  {applicablePolicy ? (
+                    <>
+                      <FieldRow label="Claim #">{claim.tpaClaimId || <span className="text-muted-foreground">Not yet assigned</span>}</FieldRow>
+                      <FieldRow label="Coverage Type">
+                        <span className="font-medium">{applicablePolicy.coverageType}</span>
+                      </FieldRow>
+                      {applicablePolicy.policy ? (
+                        <>
+                          <FieldRow label="Carrier">{applicablePolicy.policy.carrierName}</FieldRow>
+                          {applicablePolicy.policy.policyNumber && (
+                            <FieldRow label="Policy #">{applicablePolicy.policy.policyNumber}</FieldRow>
+                          )}
+                          <FieldRow label="Policy Period">
+                            {applicablePolicy.policy.policyYearStart && applicablePolicy.policy.policyYearEnd
+                              ? `${new Date(applicablePolicy.policy.policyYearStart).toLocaleDateString("en-US", { month: "short", year: "numeric" })} – ${new Date(applicablePolicy.policy.policyYearEnd).toLocaleDateString("en-US", { month: "short", year: "numeric" })}`
+                              : "-"}
+                          </FieldRow>
+                          <FieldRow label="Insured Party">{applicablePolicy.policy.insuredParty || "-"}</FieldRow>
+                          {applicablePolicy.policy.notes && (
+                            <FieldRow label="Coverage Details">
+                              <span className="text-muted-foreground italic">{applicablePolicy.policy.notes}</span>
+                            </FieldRow>
+                          )}
+                        </>
+                      ) : (
+                        <FieldRow label="Policy">
+                          <span className="text-[#C4A27F] text-[10px]">No matching policy found for this date of injury</span>
+                        </FieldRow>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Determining coverage...</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="p-4 pb-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Incident Details
+                  </h3>
+                </CardHeader>
+                <CardContent className="px-4 pb-4 space-y-0.5">
                   <FieldRow label="Status">
                     {isEditing ? (
                       <Select value={getEditValue("claimStatus") || ""} onValueChange={(v) => setEditValue("claimStatus", v)}>
@@ -413,26 +819,31 @@ export default function ClaimDetail() {
                       </Select>
                     ) : claim.claimStatus || "-"}
                   </FieldRow>
-                  <FieldRow label="Injury Type">{claim.injuryType || "-"}</FieldRow>
-                  <FieldRow label="State">{claim.stateOfInjury || "-"}</FieldRow>
-                  <FieldRow label="Shift Type">{claim.shiftType || "-"}</FieldRow>
+                  <FieldRow label="Injury Type">
+                    {isEditing ? (
+                      <Select value={getEditValue("injuryType") || ""} onValueChange={(v) => setEditValue("injuryType", v)}>
+                        <SelectTrigger className="h-7 text-xs"><SelectValue placeholder="Select type" /></SelectTrigger>
+                        <SelectContent>
+                          {INJURY_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    ) : claim.injuryType || "-"}
+                  </FieldRow>
+                  <FieldRow label="Claim Type">
+                    {isEditing ? (
+                      <Select value={getEditValue("claimType") || ""} onValueChange={(v) => setEditValue("claimType", v)}>
+                        <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {["Incident Only", "Incident Only 1099", "Incident Only W2", "Medical Only", "Other Than Medical Only", "Pending"].map((t) => (
+                            <SelectItem key={t} value={t}>{t}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : claim.claimType || "-"}
+                  </FieldRow>
                   <FieldRow label="Litigated">{claim.litigated ? "Yes" : "No"}</FieldRow>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="p-4 pb-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Parties
-                  </h3>
-                </CardHeader>
-                <CardContent className="px-4 pb-4 space-y-0.5">
-                  <FieldRow label="Partner">{claim.partnerName}</FieldRow>
-                  <FieldRow label="Insured">{claim.insuredName || "-"}</FieldRow>
-                  <FieldRow label="Carrier">{claim.carrier || "-"}</FieldRow>
-                  <FieldRow label="Policy Year">{claim.policyYear || "-"}</FieldRow>
-                  <FieldRow label="Policy #">{claim.policyNumber || "-"}</FieldRow>
-                  <FieldRow label="T&S Specialist">{claim.tnsSpecialist || "-"}</FieldRow>
+                  <Separator className="my-1.5" />
+                  <FieldRow label="T&S Agent">{claim.tnsSpecialist || "-"}</FieldRow>
                   <FieldRow label="Adjuster">
                     {isEditing ? (
                       <Input className="h-7 text-xs" value={getEditValue("adjuster") || ""} onChange={(e) => setEditValue("adjuster", e.target.value)} />
@@ -475,7 +886,7 @@ export default function ClaimDetail() {
                       <FieldRow label="Actual Settlement">{formatCurrency(claim.actualSettlementAmount)}</FieldRow>
                       {settlementSavings !== null && (
                         <FieldRow label="Settlement Savings">
-                          <span className={settlementSavings >= 0 ? "text-green-600" : "text-red-600"}>
+                          <span className={settlementSavings >= 0 ? "text-[#3B5747]" : "text-[#EC5A53]"}>
                             {formatCurrency(settlementSavings.toString())}
                           </span>
                         </FieldRow>
@@ -637,12 +1048,12 @@ export default function ClaimDetail() {
                                 {formatDateTime(note.createdAt)}
                               </span>
                               {note.targetDate && (
-                                <span className="text-[10px] text-orange-600">
+                                <span className="text-[10px] text-[#C4A27F]">
                                   Due: {formatDate(note.targetDate)}
                                 </span>
                               )}
                               {isActionItem && note.completed && (
-                                <CheckCircle2 className="h-3 w-3 text-green-600" />
+                                <CheckCircle2 className="h-3 w-3 text-[#3B5747]" />
                               )}
                             </div>
                             <p className={`text-xs whitespace-pre-wrap ${isActionItem && note.completed ? "line-through text-muted-foreground" : ""}`}>
@@ -708,27 +1119,50 @@ export default function ClaimDetail() {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {history.map((entry) => (
+                    {history.map((entry) => {
+                      let changes: { field: string; from: any; to: any }[] = [];
+                      try {
+                        if (entry.changes) {
+                          const parsed = JSON.parse(entry.changes);
+                          if (Array.isArray(parsed)) {
+                            changes = parsed.filter((c: any) => c && typeof c === "object" && "field" in c);
+                          }
+                        }
+                      } catch { /* ignore */ }
+                      return (
                       <div
                         key={entry.id}
                         className="flex items-start gap-3 border-b pb-3 last:border-0 last:pb-0"
                       >
                         <div className="mt-0.5 h-2 w-2 rounded-full bg-primary flex-shrink-0" />
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap text-xs">
-                            {entry.fromStage !== entry.toStage && (
-                              <span>
-                                Stage: {STAGE_LABELS[entry.fromStage || ""] || entry.fromStage || "?"}{" "}
-                                &rarr; {STAGE_LABELS[entry.toStage || ""] || entry.toStage || "?"}
-                              </span>
-                            )}
-                            {entry.fromStatus !== entry.toStatus && (
-                              <span>
-                                Status: {entry.fromStatus || "?"} &rarr;{" "}
-                                {entry.toStatus || "?"}
-                              </span>
-                            )}
-                          </div>
+                          {changes.length > 0 ? (
+                            <div className="space-y-0.5">
+                              {changes.map((c, i) => (
+                                <div key={i} className="text-xs">
+                                  <span className="font-medium">{formatFieldName(c.field)}</span>
+                                  <span className="text-muted-foreground">
+                                    {" "}{c.from || "—"} &rarr; {c.to || "—"}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2 flex-wrap text-xs">
+                              {entry.fromStage !== entry.toStage && (
+                                <span>
+                                  Stage: {STAGE_LABELS[entry.fromStage || ""] || entry.fromStage || "?"}{" "}
+                                  &rarr; {STAGE_LABELS[entry.toStage || ""] || entry.toStage || "?"}
+                                </span>
+                              )}
+                              {entry.fromStatus !== entry.toStatus && (
+                                <span>
+                                  Status: {entry.fromStatus || "?"} &rarr;{" "}
+                                  {entry.toStatus || "?"}
+                                </span>
+                              )}
+                            </div>
+                          )}
                           {entry.reason && (
                             <p className="text-xs text-muted-foreground mt-0.5">
                               {entry.reason}
@@ -739,7 +1173,8 @@ export default function ClaimDetail() {
                           </p>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>

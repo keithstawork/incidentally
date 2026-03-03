@@ -35,6 +35,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 const CLAIM_FIELDS = [
+  { key: "matterNumber", label: "Incident No. (match existing record for sync)", required: false },
   { key: "proName", label: "Pro Name (Full — splits into First/Last)", required: false },
   { key: "firstName", label: "First Name", required: true },
   { key: "lastName", label: "Last Name", required: true },
@@ -197,6 +198,18 @@ function autoMapColumn(header: string): string {
     "adjuster name": "adjuster",
     adjuster: "adjuster",
 
+    "case #": "matterNumber",
+    "case number": "matterNumber",
+    casenumber: "matterNumber",
+    case: "matterNumber",
+    "matter no": "matterNumber",
+    "matter no.": "matterNumber",
+    "matter number": "matterNumber",
+    matternumber: "matterNumber",
+    "incident no": "matterNumber",
+    "incident no.": "matterNumber",
+    "incident number": "matterNumber",
+    incidentnumber: "matterNumber",
     claimnumber: "tpaClaimId",
     "claim number": "tpaClaimId",
     tpaclaimid: "tpaClaimId",
@@ -348,9 +361,9 @@ function autoMapColumn(header: string): string {
 
 type ImportStep = "upload" | "map" | "preview" | "result";
 
-interface ImportResult {
-  imported: number;
-  skipped: number;
+interface SyncResult {
+  synced: number;
+  noMatch: number;
   errors: string[];
 }
 
@@ -362,7 +375,7 @@ export default function CsvImport() {
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvRows, setCsvRows] = useState<string[][]>([]);
   const [columnMapping, setColumnMapping] = useState<Record<number, string>>({});
-  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
 
   const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -412,30 +425,32 @@ export default function CsvImport() {
   });
 
   const mappedValues = Object.values(columnMapping);
-  const hasProName = mappedValues.includes("proName");
-  const hasFirstLast = mappedValues.includes("firstName") && mappedValues.includes("lastName");
-  const requiredFieldsMapped =
-    (hasProName || hasFirstLast) &&
-    ["dateOfInjury", "workerType", "partnerName"].every((f) => mappedValues.includes(f));
+  const hasSyncKey =
+    mappedValues.includes("matterNumber") ||
+    mappedValues.includes("tpaClaimId") ||
+    (mappedValues.includes("proId") && mappedValues.includes("dateOfInjury")) ||
+    (mappedValues.includes("firstName") && mappedValues.includes("lastName") && mappedValues.includes("dateOfInjury"));
+  const requiredFieldsMapped = hasSyncKey;
 
-  const importMutation = useMutation({
+  const syncMutation = useMutation({
     mutationFn: async (rows: Record<string, string>[]) => {
-      const res = await apiRequest("POST", "/api/claims/bulk-import", { rows });
-      return res.json() as Promise<ImportResult>;
+      const res = await apiRequest("POST", "/api/claims/bulk-sync", { rows });
+      return res.json() as Promise<SyncResult>;
     },
     onSuccess: (result) => {
-      setImportResult(result);
+      setSyncResult(result);
       setStep("result");
-      queryClient.invalidateQueries({ queryKey: ["/api/claims", "list"] });
+      queryClient.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith("/api/claims") });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      void queryClient.refetchQueries({ predicate: (q) => q.queryKey[0] === "/api/claims" && q.queryKey[1] === "list" });
     },
-    onError: (error) => {
-      toast({ title: "Import failed", description: error.message, variant: "destructive" });
+    onError: (error: Error) => {
+      toast({ title: "Sync failed", description: error?.message ?? "Request failed", variant: "destructive" });
     },
   });
 
-  const handleImport = () => {
-    importMutation.mutate(mappedRows);
+  const handleSync = () => {
+    syncMutation.mutate(mappedRows);
   };
 
   const handleDownloadTemplate = () => {
@@ -479,7 +494,7 @@ export default function CsvImport() {
     setCsvHeaders([]);
     setCsvRows([]);
     setColumnMapping({});
-    setImportResult(null);
+    setSyncResult(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -494,10 +509,10 @@ export default function CsvImport() {
           </Button>
           <div className="flex-1">
             <h1 className="text-lg font-semibold" data-testid="text-import-title">
-              Import Claims from CSV
+              Sync data to existing claims
             </h1>
             <p className="text-xs text-muted-foreground">
-              Upload a CSV file to bulk-create claim records
+              Add or update fields on cases already in the app — e.g. a new column (adjuster, settlement amount) on existing claims
             </p>
           </div>
         </div>
@@ -533,11 +548,9 @@ export default function CsvImport() {
                     <FileSpreadsheet className="h-8 w-8 text-muted-foreground" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-semibold">Upload your CSV file</h3>
+                    <h3 className="text-sm font-semibold">Add or update fields on existing cases</h3>
                     <p className="text-xs text-muted-foreground mt-1 max-w-md">
-                      Your CSV should have a header row with column names. The importer will
-                      attempt to automatically map columns to claim fields. At minimum, you need:
-                      first name, last name, date of injury, worker type, and partner name.
+                      Your file may be new data for incidents already in the database — e.g. a new field (adjuster, settlement date) added to existing records. Map at least one column to match rows (Incident No., Claim Number, or Pro ID + Date of Injury, or First + Last + Date of Injury). Matched records get the other columns applied as updates.
                     </p>
                   </div>
 
@@ -587,13 +600,12 @@ export default function CsvImport() {
                   <div>
                     <h3 className="text-sm font-semibold">Map Columns</h3>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      {fileName} &mdash; {csvRows.length} rows, {csvHeaders.length} columns detected.
-                      Map each CSV column to a claim field. Use "Pro Name" for a combined name column — it will auto-split into first/last. Shift type accepts W2, 1099, CL, Workers Compensation, Occupational Accident, or Contingent Liability.
+                      {fileName} &mdash; {csvRows.length} rows, {csvHeaders.length} columns. Map at least one column to match rows to claims; map any other columns to the claim fields you want to add or update (e.g. adjuster, settlement amount, new fields on existing cases).
                     </p>
                   </div>
                   {!requiredFieldsMapped && (
                     <Badge variant="destructive" className="text-[10px]">
-                      Missing required mappings
+                      Map at least one: Incident No., Claim Number, or Pro ID + Date of Injury, or First + Last + Date of Injury
                     </Badge>
                   )}
                 </CardHeader>
@@ -669,10 +681,9 @@ export default function CsvImport() {
             <>
               <Card>
                 <CardHeader className="p-4 pb-2">
-                  <h3 className="text-sm font-semibold">Preview Import</h3>
+                  <h3 className="text-sm font-semibold">Preview</h3>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Showing first {Math.min(mappedRows.length, 10)} of {mappedRows.length} rows.
-                    Review the data before importing.
+                    First {Math.min(mappedRows.length, 10)} of {mappedRows.length} rows. Rows that match an existing case will have these fields added or updated.
                   </p>
                 </CardHeader>
                 <CardContent className="p-4 pt-2">
@@ -725,19 +736,19 @@ export default function CsvImport() {
                   Back to Mapping
                 </Button>
                 <Button
-                  onClick={handleImport}
-                  disabled={importMutation.isPending}
+                  onClick={handleSync}
+                  disabled={syncMutation.isPending}
                   data-testid="button-run-import"
                 >
-                  {importMutation.isPending ? (
+                  {syncMutation.isPending ? (
                     <>
                       <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                      Importing {mappedRows.length} claims...
+                      Syncing {mappedRows.length} rows...
                     </>
                   ) : (
                     <>
                       <Upload className="mr-1.5 h-3.5 w-3.5" />
-                      Import {mappedRows.length} Claims
+                      Sync {mappedRows.length} rows
                     </>
                   )}
                 </Button>
@@ -745,47 +756,53 @@ export default function CsvImport() {
             </>
           )}
 
-          {step === "result" && importResult && (
+          {step === "result" && syncResult && (
             <Card>
               <CardContent className="p-8">
                 <div className="flex flex-col items-center text-center space-y-4">
-                  {importResult.imported > 0 ? (
-                    <div className="rounded-full bg-green-100 p-4">
-                      <CheckCircle2 className="h-8 w-8 text-green-600" />
+                  {syncResult.synced > 0 ? (
+                    <div className="rounded-full bg-[#3B5747]/15 p-4">
+                      <CheckCircle2 className="h-8 w-8 text-[#3B5747]" />
                     </div>
                   ) : (
-                    <div className="rounded-full bg-red-100 p-4">
-                      <AlertCircle className="h-8 w-8 text-red-600" />
+                    <div className="rounded-full bg-[#C4A27F]/15 p-4">
+                      <AlertCircle className="h-8 w-8 text-[#C4A27F]" />
                     </div>
                   )}
-
                   <div>
-                    <h3 className="text-lg font-semibold">Import Complete</h3>
-                    <div className="flex items-center justify-center gap-4 mt-2">
+                    <h3 className="text-lg font-semibold">Sync complete</h3>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {syncResult.synced > 0
+                        ? "Existing cases updated with the new or changed fields from your file."
+                        : syncResult.noMatch > 0
+                          ? "No rows matched existing records. Map a column to Incident No. or Claim Number (or Pro ID + Date of Injury, or First + Last + Date of Injury) so rows can match."
+                          : "Existing cases updated with the new or changed fields from your file."}
+                    </p>
+                    <div className="flex items-center justify-center gap-6 mt-3">
                       <div className="text-center">
-                        <p className="text-2xl font-bold text-green-600" data-testid="text-imported-count">
-                          {importResult.imported}
+                        <p className="text-2xl font-bold text-[#3B5747]" data-testid="text-synced-count">
+                          {syncResult.synced}
                         </p>
-                        <p className="text-[10px] text-muted-foreground uppercase">Imported</p>
+                        <p className="text-[10px] text-muted-foreground uppercase">Updated</p>
                       </div>
-                      {importResult.skipped > 0 && (
+                      {syncResult.noMatch > 0 && (
                         <div className="text-center">
-                          <p className="text-2xl font-bold text-orange-600" data-testid="text-skipped-count">
-                            {importResult.skipped}
+                          <p className="text-2xl font-bold text-[#C4A27F]" data-testid="text-nomatch-count">
+                            {syncResult.noMatch}
                           </p>
-                          <p className="text-[10px] text-muted-foreground uppercase">Skipped</p>
+                          <p className="text-[10px] text-muted-foreground uppercase">No match</p>
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {importResult.errors.length > 0 && (
+                  {syncResult.errors.length > 0 && (
                     <div className="w-full max-w-lg text-left">
-                      <p className="text-xs font-medium text-red-600 mb-1">
-                        Errors ({importResult.errors.length})
+                      <p className="text-xs font-medium text-[#EC5A53] mb-1">
+                        Errors ({syncResult.errors.length})
                       </p>
                       <ScrollArea className="max-h-[200px] rounded-md border bg-muted/50 p-3">
-                        {importResult.errors.map((err, i) => (
+                        {syncResult.errors.map((err, i) => (
                           <p key={i} className="text-[10px] text-muted-foreground py-0.5">
                             {err}
                           </p>
@@ -795,11 +812,8 @@ export default function CsvImport() {
                   )}
 
                   <div className="flex gap-2 pt-2">
-                    <Button variant="outline" onClick={handleReset} data-testid="button-import-another">
-                      Import Another File
-                    </Button>
                     <Button asChild data-testid="button-view-claims-after-import">
-                      <Link href="/claims">View All Claims</Link>
+                      <Link href="/claims">View claims</Link>
                     </Button>
                   </div>
                 </div>
