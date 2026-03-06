@@ -36,7 +36,7 @@ Status: ✅ Done · 🔧 In progress · ⬜ Not started · 🚫 Blocked
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 2.1 | Database name cleanup (claimant/Pro names with extra characters or artifacts) | 🔧 | In review |
+| 2.1 | Database name cleanup (claimant/Pro names with extra characters or artifacts) | ✅ | Added middle_name, suffix, preferred_name, name_aliases fields; fixed 5 malformed records |
 | 2.2 | Google Drive document import (match files to open incidents, store in doc library) | ⬜ | No AI summary; architecture decided |
 | 2.3 | Google Workspace sign-on (replace placeholder auth with real Google OAuth) | ⬜ | |
 | 2.4 | Pro Details card: shift count stats (total / W2 / 1099) and open claims check | ⬜ | Paused during cleanup |

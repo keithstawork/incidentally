@@ -60,7 +60,11 @@ export const formSchema = insertClaimSchema
   })
   .extend({
     firstName: z.string().min(1, "First name is required"),
+    middleName: z.string().optional(),
     lastName: z.string().min(1, "Last name is required"),
+    suffix: z.string().optional(),
+    preferredName: z.string().optional(),
+    nameAliases: z.array(z.string()).optional(),
     dateOfInjury: z.string().min(1, "Date of injury is required"),
     workerType: z.enum(["W2", "1099"]).optional(),
     partnerName: z.string().min(1, "Partner name is required"),

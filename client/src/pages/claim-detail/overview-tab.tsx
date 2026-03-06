@@ -1,6 +1,8 @@
-import { ExternalLink } from "lucide-react";
+import { useState } from "react";
+import { ExternalLink, Plus, X } from "lucide-react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
   Select,
@@ -39,6 +41,20 @@ export function OverviewTab({
   settlementSavings,
   updateMutation,
 }: OverviewTabProps) {
+  const [aliasInput, setAliasInput] = useState("");
+  const currentAliases: string[] = getEditValue("nameAliases") || claim.nameAliases || [];
+
+  function addAlias() {
+    const val = aliasInput.trim();
+    if (!val || currentAliases.includes(val)) return;
+    setEditValue("nameAliases", [...currentAliases, val]);
+    setAliasInput("");
+  }
+
+  function removeAlias(alias: string) {
+    setEditValue("nameAliases", currentAliases.filter((a: string) => a !== alias));
+  }
+
   return (
     <div className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-2">
@@ -57,10 +73,63 @@ export function OverviewTab({
                 <Input className="h-7 text-xs" value={getEditValue("firstName")} onChange={(e) => setEditValue("firstName", e.target.value)} />
               ) : claim.firstName}
             </FieldRow>
+            <FieldRow label="Middle Name">
+              {isEditing ? (
+                <Input className="h-7 text-xs" placeholder="optional" value={getEditValue("middleName") ?? ""} onChange={(e) => setEditValue("middleName", e.target.value)} />
+              ) : claim.middleName || "-"}
+            </FieldRow>
             <FieldRow label="Last Name">
               {isEditing ? (
                 <Input className="h-7 text-xs" value={getEditValue("lastName")} onChange={(e) => setEditValue("lastName", e.target.value)} />
               ) : claim.lastName}
+            </FieldRow>
+            <FieldRow label="Suffix">
+              {isEditing ? (
+                <Input className="h-7 text-xs" placeholder="Jr., Sr., II…" value={getEditValue("suffix") ?? ""} onChange={(e) => setEditValue("suffix", e.target.value)} />
+              ) : claim.suffix || "-"}
+            </FieldRow>
+            <FieldRow label="Preferred Name">
+              {isEditing ? (
+                <Input className="h-7 text-xs" placeholder="Goes by…" value={getEditValue("preferredName") ?? ""} onChange={(e) => setEditValue("preferredName", e.target.value)} />
+              ) : claim.preferredName || "-"}
+            </FieldRow>
+            <FieldRow label="Other Names">
+              {isEditing ? (
+                <div className="space-y-1">
+                  <div className="flex gap-1">
+                    <Input
+                      className="h-7 text-xs flex-1"
+                      placeholder="Add alias, press Enter"
+                      value={aliasInput}
+                      onChange={(e) => setAliasInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addAlias(); } }}
+                    />
+                    <button type="button" onClick={addAlias} className="px-2 rounded border text-xs hover:bg-muted">
+                      <Plus className="h-3 w-3" />
+                    </button>
+                  </div>
+                  {currentAliases.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {currentAliases.map((alias: string) => (
+                        <Badge key={alias} variant="secondary" className="text-xs gap-1 pr-1">
+                          {alias}
+                          <button type="button" onClick={() => removeAlias(alias)} className="hover:text-destructive">
+                            <X className="h-3 w-3" />
+                          </button>
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                claim.nameAliases && claim.nameAliases.length > 0 ? (
+                  <div className="flex flex-wrap gap-1">
+                    {claim.nameAliases.map((alias) => (
+                      <Badge key={alias} variant="secondary" className="text-xs">{alias}</Badge>
+                    ))}
+                  </div>
+                ) : "-"
+              )}
             </FieldRow>
             <FieldRow label="Pro ID">
               {claim.proId ? (
