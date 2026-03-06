@@ -19,10 +19,22 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+const GEOCODE_CACHE_MAX = 1000;
+
 class ProStorage {
   private syncedMonths = new Map<string, number>();
   private geocodeCache = new Map<string, { city: string | null; state: string | null; address: string | null } | null>();
   private lastGeocodeTick = 0;
+
+  private evictGeocodeCache(): void {
+    if (this.geocodeCache.size <= GEOCODE_CACHE_MAX) return;
+    const toRemove = this.geocodeCache.size - GEOCODE_CACHE_MAX;
+    const keys = this.geocodeCache.keys();
+    for (let i = 0; i < toRemove; i++) {
+      const { value } = keys.next();
+      if (value) this.geocodeCache.delete(value);
+    }
+  }
 
   async getPro(proId: number): Promise<Pro | null> {
     const [local] = await db.select().from(pros).where(eq(pros.proId, proId));
@@ -55,7 +67,10 @@ class ProStorage {
 
     const looksLikePhone = /[\d()\-]/.test(query) && digitsOnly.length >= 3;
     const words = query.split(/\s+/).filter(Boolean);
+    const TRGM_THRESHOLD = 0.3;
+
     let localWhere;
+    let similarityScore;
 
     if (looksLikePhone) {
       localWhere = or(
@@ -66,22 +81,44 @@ class ProStorage {
         ilike(pros.familyName, `%${query}%`),
         ilike(pros.email, `%${query}%`)
       )!;
+      similarityScore = sql<number>`0`;
     } else if (words.length > 1) {
-      localWhere = sql`(${ilike(pros.givenName, `%${words[0]}%`)} AND ${ilike(pros.familyName, `%${words.slice(1).join(" ")}%`)}) OR ${ilike(pros.name, `%${query}%`)} OR ${ilike(pros.email, `%${query}%`)}`;
+      const firstName = words[0];
+      const lastName = words.slice(1).join(" ");
+      localWhere = sql`(
+        (${ilike(pros.givenName, `%${firstName}%`)} AND ${ilike(pros.familyName, `%${lastName}%`)})
+        OR ${ilike(pros.name, `%${query}%`)}
+        OR ${ilike(pros.email, `%${query}%`)}
+        OR (similarity(${pros.givenName}, ${firstName}) > ${TRGM_THRESHOLD}
+            AND similarity(${pros.familyName}, ${lastName}) > ${TRGM_THRESHOLD})
+      )`;
+      similarityScore = sql<number>`(
+        COALESCE(similarity(${pros.givenName}, ${firstName}), 0)
+        + COALESCE(similarity(${pros.familyName}, ${lastName}), 0)
+      )`;
     } else {
-      localWhere = or(
-        ilike(pros.name, `%${query}%`),
-        ilike(pros.givenName, `%${query}%`),
-        ilike(pros.familyName, `%${query}%`),
-        ilike(pros.email, `%${query}%`),
-        ilike(pros.phone, `%${query}%`)
-      )!;
+      localWhere = sql`(
+        ${ilike(pros.name, `%${query}%`)}
+        OR ${ilike(pros.givenName, `%${query}%`)}
+        OR ${ilike(pros.familyName, `%${query}%`)}
+        OR ${ilike(pros.email, `%${query}%`)}
+        OR ${ilike(pros.phone, `%${query}%`)}
+        OR similarity(${pros.givenName}, ${query}) > ${TRGM_THRESHOLD}
+        OR similarity(${pros.familyName}, ${query}) > ${TRGM_THRESHOLD}
+        OR similarity(${pros.name}, ${query}) > ${TRGM_THRESHOLD}
+      )`;
+      similarityScore = sql<number>`GREATEST(
+        COALESCE(similarity(${pros.givenName}, ${query}), 0),
+        COALESCE(similarity(${pros.familyName}, ${query}), 0),
+        COALESCE(similarity(${pros.name}, ${query}), 0)
+      )`;
     }
 
     const localResults = await db
       .select()
       .from(pros)
       .where(localWhere)
+      .orderBy(desc(similarityScore))
       .limit(20);
 
     if (localResults.length >= 5) return localResults;
@@ -149,11 +186,26 @@ class ProStorage {
     const escapedDigits = escaped.replace(/[\s()\-\.]/g, "");
     const words = escaped.split(/\s+/).filter(Boolean).map(w => sanitizeStr(w));
 
+    const fuzzyPrefix = (word: string) =>
+      word.length >= 4 ? word.slice(0, -1) : word;
+
     let nameFilter: string;
     if (words.length > 1) {
-      nameFilter = `(given_name ILIKE '%${words[0]}%' AND family_name ILIKE '%${words.slice(1).join(" ")}%') OR name ILIKE '%${escaped}%'`;
+      const first = words[0];
+      const last = words.slice(1).join(" ");
+      const firstFuzzy = fuzzyPrefix(first);
+      const lastFuzzy = fuzzyPrefix(last);
+      nameFilter = [
+        `(given_name ILIKE '%${first}%' AND family_name ILIKE '%${last}%')`,
+        `(given_name ILIKE '%${firstFuzzy}%' AND family_name ILIKE '%${lastFuzzy}%')`,
+        `name ILIKE '%${escaped}%'`,
+      ].join(" OR ");
     } else {
       nameFilter = `name ILIKE '%${escaped}%' OR given_name ILIKE '%${escaped}%' OR family_name ILIKE '%${escaped}%' OR email ILIKE '%${escaped}%' OR phonenum ILIKE '%${escaped}%'`;
+      if (escaped.length >= 4) {
+        const prefix = fuzzyPrefix(escaped);
+        nameFilter += ` OR given_name ILIKE '%${prefix}%' OR family_name ILIKE '%${prefix}%'`;
+      }
       if (escapedDigits.length >= 3) {
         nameFilter += ` OR phonenum ILIKE '%${escapedDigits}%'`;
       }
@@ -476,6 +528,7 @@ class ProStorage {
 
       const result = { city, state: state?.length === 2 ? state : null, address };
       this.geocodeCache.set(geocode, result);
+      this.evictGeocodeCache();
       return result;
     } catch (err) {
       console.error("Reverse geocode failed:", err);

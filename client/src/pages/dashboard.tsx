@@ -27,6 +27,8 @@ import {
 } from "recharts";
 import { FinancialsContent } from "./financials";
 import { RiskAnalyticsContent } from "./risk-analytics";
+import { STATUS_COLORS } from "@/lib/constants";
+import { formatCurrencyCompact, formatMonth } from "@/lib/formatters";
 
 interface DashboardStats {
   totalClaims: number;
@@ -50,33 +52,11 @@ interface DashboardStats {
   repeatPros: { proId: string; name: string; count: number }[];
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  Open: "#C4A27F",
-  Closed: "#3B5747",
-  Denied: "#EC5A53",
-  "Incident Only": "#576270",
-  "Incident Report": "#576270",
-  "Not reported/Incident only 1099": "#576270",
-};
-
-function formatCurrency(amount: number): string {
-  if (amount >= 1_000_000) return `$${(amount / 1_000_000).toFixed(1)}M`;
-  if (amount >= 1_000) return `$${(amount / 1_000).toFixed(0)}K`;
-  return new Intl.NumberFormat("en-US", {
-    style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 0,
-  }).format(amount);
-}
-
-function formatMonth(month: string): string {
-  const [year, m] = month.split("-");
-  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return `${months[parseInt(m) - 1]} '${year.slice(2)}`;
-}
 
 function OverviewContent({ stats }: { stats: DashboardStats }) {
   const statCards = [
     { label: "Open", value: stats.totalOpen, icon: FileText, color: "text-[#C4A27F]" },
-    { label: "Total Incurred", value: formatCurrency(stats.totalIncurred), icon: DollarSign, color: "text-[#3B5747]", sub: "Open claims" },
+    { label: "Total Incurred", value: formatCurrencyCompact(stats.totalIncurred), icon: DollarSign, color: "text-[#3B5747]", sub: "Open claims" },
     { label: "W2 Claims", value: stats.w2Claims, icon: Users, color: "text-[#3B5747]" },
     { label: "1099 Claims", value: stats.ioccClaims, icon: ShieldCheck, color: "text-[#EC5A53]" },
   ];
@@ -109,28 +89,28 @@ function OverviewContent({ stats }: { stats: DashboardStats }) {
         <Card>
           <CardContent className="p-4">
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Losses Paid</p>
-            <p className="mt-1 text-xl font-bold">{formatCurrency(stats.totalPayments)}</p>
+            <p className="mt-1 text-xl font-bold">{formatCurrencyCompact(stats.totalPayments)}</p>
             <p className="text-[10px] text-muted-foreground">Indemnity + medical, all claims</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Medical Incurred</p>
-            <p className="mt-1 text-xl font-bold">{formatCurrency(stats.totalMedical)}</p>
+            <p className="mt-1 text-xl font-bold">{formatCurrencyCompact(stats.totalMedical)}</p>
             <p className="text-[10px] text-muted-foreground">Paid + reserves, all claims</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">LAE</p>
-            <p className="mt-1 text-xl font-bold">{formatCurrency(stats.totalLAE)}</p>
+            <p className="mt-1 text-xl font-bold">{formatCurrencyCompact(stats.totalLAE)}</p>
             <p className="text-[10px] text-muted-foreground">Loss adjustment expenses</p>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="p-4">
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Total Incurred</p>
-            <p className="mt-1 text-xl font-bold text-[#3B5747]">{formatCurrency(stats.totalIncurred)}</p>
+            <p className="mt-1 text-xl font-bold text-[#3B5747]">{formatCurrencyCompact(stats.totalIncurred)}</p>
             <p className="text-[10px] text-muted-foreground">Open claims</p>
           </CardContent>
         </Card>

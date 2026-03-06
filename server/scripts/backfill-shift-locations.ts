@@ -3,21 +3,17 @@
  * (proId + dateOfInjury + partnerName), reverse-geocoding the gig template geocode,
  * and storing the address. Also backfills partner_state from the shift if blank.
  */
-import { db, pool } from "../db";
+import { db } from "../db";
 import { claims } from "@shared/schema";
 import { executeRedshiftQuery } from "../redshift";
 import { sql, eq } from "drizzle-orm";
-
-const EXECUTE = process.argv.includes("--execute");
+import pLimit from "p-limit";
+import { EXECUTE, sanitize, teardown } from "./lib/shared";
 
 const geocodeCache = new Map<string, { city: string | null; state: string | null; address: string | null }>();
 let lastGeocodeTick = 0;
 
 function delay(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
-
-function sanitize(s: string): string {
-  return s.replace(/'/g, "''").trim();
-}
 
 async function reverseGeocode(geocode: string): Promise<{ city: string | null; state: string | null; address: string | null } | null> {
   if (geocodeCache.has(geocode)) return geocodeCache.get(geocode)!;
@@ -117,28 +113,30 @@ async function run() {
   let noGeocode = 0;
   let noAddress = 0;
   let errorCount = 0;
+  let processed = 0;
 
-  for (let i = 0; i < eligible.length; i++) {
-    const c = eligible[i];
+  const limit = pLimit(2);
+  const tasks = eligible.map((c) => limit(async () => {
+    const idx = ++processed;
     const label = `${c.matterNumber || "#" + c.id} (${c.lastName}, ${c.firstName} | Pro ${c.proId})`;
-    if ((i + 1) % 25 === 0) console.log(`  ... ${i + 1}/${eligible.length}`);
+    if (idx % 25 === 0) console.log(`  ... ${idx}/${eligible.length}`);
 
     const proId = parseInt(c.proId!, 10);
     if (isNaN(proId)) {
       errorCount++;
-      continue;
+      return;
     }
 
     const shift = await findShiftGeocode(proId, c.dateOfInjury, c.partnerName);
     if (!shift) {
       noGeocode++;
-      continue;
+      return;
     }
 
     const geo = await reverseGeocode(shift.geocode);
     if (!geo || !geo.address) {
       noAddress++;
-      continue;
+      return;
     }
 
     filled++;
@@ -151,7 +149,8 @@ async function run() {
       }
       await db.update(claims).set(updates).where(eq(claims.id, c.id));
     }
-  }
+  }));
+  await Promise.all(tasks);
 
   console.log("\n========== SUMMARY ==========");
   console.log(`Eligible claims:      ${eligible.length}`);
@@ -166,5 +165,5 @@ async function run() {
 }
 
 run()
-  .then(() => { pool.end(); process.exit(0); })
-  .catch((err) => { console.error("Failed:", err); pool.end(); process.exit(1); });
+  .then(() => teardown(0))
+  .catch((err) => { console.error("Failed:", err); teardown(1); });

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
@@ -410,7 +410,7 @@ export default function CsvImport() {
     reader.readAsText(file);
   }, [toast]);
 
-  const mappedRows = csvRows.map((row) => {
+  const mappedRows = useMemo(() => csvRows.map((row) => {
     const obj: Record<string, string> = {};
     Object.entries(columnMapping).forEach(([colIdxStr, fieldKey]) => {
       if (fieldKey !== SKIP_VALUE) {
@@ -422,15 +422,15 @@ export default function CsvImport() {
       }
     });
     return obj;
-  });
+  }), [csvRows, columnMapping]);
 
-  const mappedValues = Object.values(columnMapping);
-  const hasSyncKey =
-    mappedValues.includes("matterNumber") ||
-    mappedValues.includes("tpaClaimId") ||
-    (mappedValues.includes("proId") && mappedValues.includes("dateOfInjury")) ||
-    (mappedValues.includes("firstName") && mappedValues.includes("lastName") && mappedValues.includes("dateOfInjury"));
-  const requiredFieldsMapped = hasSyncKey;
+  const requiredFieldsMapped = useMemo(() => {
+    const mappedValues = Object.values(columnMapping);
+    return mappedValues.includes("matterNumber") ||
+      mappedValues.includes("tpaClaimId") ||
+      (mappedValues.includes("proId") && mappedValues.includes("dateOfInjury")) ||
+      (mappedValues.includes("firstName") && mappedValues.includes("lastName") && mappedValues.includes("dateOfInjury"));
+  }, [columnMapping]);
 
   const syncMutation = useMutation({
     mutationFn: async (rows: Record<string, string>[]) => {

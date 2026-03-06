@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
-import { Loader2, User } from "lucide-react";
+import { Search, User } from "lucide-react";
 
 interface Pro {
   proId: number;
@@ -28,54 +29,51 @@ interface ProSearchProps {
 
 export function ProSearch({ value, onChange, onProSelected, className }: ProSearchProps) {
   const [query, setQuery] = useState(value || "");
-  const [results, setResults] = useState<Pro[]>([]);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [isOpen, setIsOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>();
 
-  const search = useCallback(async (q: string) => {
-    if (q.length < 2) {
-      setResults([]);
-      setIsOpen(false);
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      const res = await fetch(`/api/pros/search?q=${encodeURIComponent(q)}`, {
+  const { data: results = [], isFetching } = useQuery<Pro[]>({
+    queryKey: ["/api/pros", "search", debouncedQuery],
+    queryFn: async () => {
+      const res = await fetch(`/api/pros/search?q=${encodeURIComponent(debouncedQuery)}`, {
         credentials: "include",
       });
-      if (res.ok) {
-        const data = await res.json();
-        setResults(data);
-        setIsOpen(data.length > 0);
-        setSelectedIndex(-1);
-      }
-    } catch {
-      setResults([]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+      if (!res.ok) return [];
+      return res.json();
+    },
+    enabled: debouncedQuery.length >= 2,
+    staleTime: 30_000,
+  });
 
-  const handleInput = (val: string) => {
+  useEffect(() => {
+    if (results.length > 0 && debouncedQuery.length >= 2) {
+      setIsOpen(true);
+      setSelectedIndex(-1);
+    } else if (debouncedQuery.length < 2) {
+      setIsOpen(false);
+    }
+  }, [results, debouncedQuery]);
+
+  const handleInput = useCallback((val: string) => {
     setQuery(val);
     onChange(val);
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => search(val), 300);
-  };
+    debounceRef.current = setTimeout(() => setDebouncedQuery(val), 300);
+  }, [onChange]);
 
-  const selectPro = (pro: Pro) => {
+  const selectPro = useCallback((pro: Pro) => {
     setQuery(String(pro.proId));
     onChange(String(pro.proId));
     setIsOpen(false);
+    setDebouncedQuery("");
     onProSelected?.(pro);
-  };
+  }, [onChange, onProSelected]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (!isOpen) return;
     if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -89,7 +87,7 @@ export function ProSearch({ value, onChange, onProSelected, className }: ProSear
     } else if (e.key === "Escape") {
       setIsOpen(false);
     }
-  };
+  }, [isOpen, selectedIndex, results, selectPro]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -112,17 +110,29 @@ export function ProSearch({ value, onChange, onProSelected, className }: ProSear
           value={query}
           onChange={(e) => handleInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          onFocus={() => results.length > 0 && setIsOpen(true)}
+          onFocus={() => results.length > 0 && debouncedQuery.length >= 2 && setIsOpen(true)}
           placeholder="Search by ID, name, or email..."
           className={className}
           data-testid="input-pro-search"
         />
-        {isLoading && (
-          <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-muted-foreground" />
+        {isFetching && (
+          <Search className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-pulse text-primary" />
         )}
       </div>
 
-      {isOpen && (
+      {isFetching && debouncedQuery.length >= 2 && (
+        <div className="absolute z-50 top-full mt-1 w-full rounded-md border bg-popover px-3 py-2.5 shadow-lg">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+            <Search className="h-3.5 w-3.5 animate-pulse text-primary" />
+            <span>Searching for &ldquo;{debouncedQuery}&rdquo;&hellip;</span>
+          </div>
+          <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+            <div className="h-full w-1/2 rounded-full bg-primary animate-shimmer" />
+          </div>
+        </div>
+      )}
+
+      {isOpen && !isFetching && (
         <div className="absolute z-50 top-full mt-1 w-full rounded-md border bg-popover shadow-lg max-h-64 overflow-auto">
           {results.map((pro, i) => (
             <button

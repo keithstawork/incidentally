@@ -2,6 +2,7 @@ import { db } from "../db";
 import { pros, claims } from "@shared/schema";
 import { executeRedshiftQuery } from "../redshift";
 import { sql, isNotNull } from "drizzle-orm";
+import { teardown } from "./lib/shared";
 
 const BATCH_SIZE = 500;
 
@@ -105,8 +106,5 @@ async function syncClaimPros() {
 }
 
 syncClaimPros()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    console.error("Sync failed:", err);
-    process.exit(1);
-  });
+  .then(() => teardown(0))
+  .catch((err) => { console.error("Sync failed:", err); teardown(1); });

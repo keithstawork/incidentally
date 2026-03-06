@@ -1,8 +1,38 @@
-node_modules
-dist
-.DS_Store
+# Environment
 .env
+.env.local
+.env.*.local
+
+# Node
+node_modules/
+dist/
+.next/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python (for any scripts)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Project-specific
 server/public
 vite.config.ts.*
 *.tar.gz
 pro-id-manual-review.html
+pro-id-manual-review.csv
+uploads/
+
+# Data exports (never commit raw data)
+*.xlsx
+*.json.bak
+
+# Editor
+*.swp
+*.zip

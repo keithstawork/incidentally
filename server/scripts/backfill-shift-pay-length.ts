@@ -1,81 +1,13 @@
 /**
- * Backfill pay_rate and shift_length_hours on claims by looking up the shift
- * in Redshift (proId + dateOfInjury + partnerName) and pulling the applicant
- * rate and scheduled start/end times.
+ * Backfill pay_rate and shift_length_hours on claims using a single bulk
+ * Redshift query instead of one-per-claim. Runs in under a minute.
  */
-import { db, pool } from "../db";
+import { db } from "../db";
 import { claims } from "@shared/schema";
 import { executeRedshiftQuery } from "../redshift";
 import { sql, eq } from "drizzle-orm";
-
-const EXECUTE = process.argv.includes("--execute");
-
-function sanitize(s: string): string {
-  return s.replace(/'/g, "''").trim();
-}
-
-interface ShiftPayInfo {
-  shiftId: number;
-  applicantRate: number | null;
-  hoursScheduled: number | null;
-}
-
-async function findShiftPayInfo(
-  proId: number,
-  doi: string,
-  partnerName: string | null,
-): Promise<ShiftPayInfo | null> {
-  const safeDate = sanitize(doi);
-  const nextDay = new Date(doi);
-  nextDay.setDate(nextDay.getDate() + 1);
-  const safeNext = nextDay.toISOString().split("T")[0];
-
-  let partnerClause = "";
-  if (partnerName && partnerName.trim()) {
-    const safe = sanitize(partnerName).substring(0, 50);
-    partnerClause = `AND LOWER(TRIM(g.business_name)) LIKE LOWER('%${safe}%')`;
-  }
-
-  const query = `
-    SELECT g.shift_id,
-           g.booking_applicant_rate_usd,
-           g.starts_at,
-           g.ends_at
-    FROM iw_backend_db.gigs_view g
-    WHERE g.worker_id = ${proId}
-      AND g.starts_at >= '${safeDate}'
-      AND g.starts_at < '${safeNext}'
-      AND g.is_cancelled = 0
-      ${partnerClause}
-    LIMIT 1
-  `;
-
-  try {
-    const { columns, rows } = await executeRedshiftQuery(query);
-    if (rows.length === 0) return null;
-    const ci = Object.fromEntries(columns.map((c, i) => [c, i]));
-
-    const rate = rows[0][ci.booking_applicant_rate_usd];
-    const startsAt = rows[0][ci.starts_at] as string | null;
-    const endsAt = rows[0][ci.ends_at] as string | null;
-
-    let hoursScheduled: number | null = null;
-    if (startsAt && endsAt) {
-      const diffMs = new Date(endsAt).getTime() - new Date(startsAt).getTime();
-      if (diffMs > 0) {
-        hoursScheduled = Math.round((diffMs / (1000 * 60 * 60)) * 100) / 100;
-      }
-    }
-
-    return {
-      shiftId: rows[0][ci.shift_id] as number,
-      applicantRate: rate != null ? parseFloat(String(rate)) : null,
-      hoursScheduled,
-    };
-  } catch {
-    return null;
-  }
-}
+import pLimit from "p-limit";
+import { EXECUTE, sanitize, teardown } from "./lib/shared";
 
 async function run() {
   console.log(`Mode: ${EXECUTE ? "EXECUTE" : "DRY RUN"}\n`);
@@ -102,62 +34,136 @@ async function run() {
     )
     .orderBy(claims.id);
 
-  console.log(
-    `Found ${eligible.length} claims needing pay rate / shift length\n`,
-  );
+  console.log(`Found ${eligible.length} claims needing pay rate / shift length\n`);
+
+  const validClaims = eligible.filter((c) => {
+    const proId = parseInt(c.proId!, 10);
+    return !isNaN(proId) && proId > 0;
+  });
+
+  if (validClaims.length === 0) {
+    console.log("No valid claims to process.");
+    return;
+  }
+
+  // Build a single bulk query with all (worker_id, date) pairs
+  // Redshift has a limit on query size, so batch into chunks of ~500
+  const BATCH_SIZE = 500;
+  const allResults = new Map<string, { rate: number | null; hours: number | null }>();
+
+  for (let batch = 0; batch < validClaims.length; batch += BATCH_SIZE) {
+    const chunk = validClaims.slice(batch, batch + BATCH_SIZE);
+    const batchNum = Math.floor(batch / BATCH_SIZE) + 1;
+    const totalBatches = Math.ceil(validClaims.length / BATCH_SIZE);
+    console.log(`  Querying Redshift batch ${batchNum}/${totalBatches} (${chunk.length} claims)...`);
+
+    // Build WHERE clause: (worker_id = X AND starts_at::date = 'YYYY-MM-DD') OR ...
+    const conditions = chunk.map((c) => {
+      const proId = parseInt(c.proId!, 10);
+      const safeDate = sanitize(c.dateOfInjury);
+      return `(g.worker_id = ${proId} AND g.starts_at::date = '${safeDate}')`;
+    });
+
+    const query = `
+      SELECT g.worker_id,
+             g.starts_at::date AS doi,
+             g.booking_applicant_rate_usd,
+             g.starts_at,
+             g.ends_at,
+             ROW_NUMBER() OVER (
+               PARTITION BY g.worker_id, g.starts_at::date
+               ORDER BY g.starts_at
+             ) AS rn
+      FROM iw_backend_db.gigs_view g
+      WHERE g.is_cancelled = 0
+        AND (${conditions.join("\n        OR ")})
+    `;
+
+    try {
+      const { columns, rows } = await executeRedshiftQuery(query);
+      const ci = Object.fromEntries(columns.map((c, i) => [c, i]));
+
+      for (const row of rows) {
+        if (row[ci.rn] !== 1 && row[ci.rn] !== "1") continue; // first shift per worker+date only
+
+        const workerId = String(row[ci.worker_id]);
+        const doi = String(row[ci.doi]);
+        const key = `${workerId}|${doi}`;
+
+        const rateVal = row[ci.booking_applicant_rate_usd];
+        const startsAt = row[ci.starts_at] as string | null;
+        const endsAt = row[ci.ends_at] as string | null;
+
+        let hours: number | null = null;
+        if (startsAt && endsAt) {
+          const diffMs = new Date(endsAt).getTime() - new Date(startsAt).getTime();
+          if (diffMs > 0) {
+            hours = Math.round((diffMs / (1000 * 60 * 60)) * 100) / 100;
+          }
+        }
+
+        allResults.set(key, {
+          rate: rateVal != null ? parseFloat(String(rateVal)) : null,
+          hours,
+        });
+      }
+    } catch (err) {
+      console.error(`  Batch ${batchNum} failed:`, err);
+    }
+  }
+
+  console.log(`\nRedshift returned data for ${allResults.size} worker+date pairs\n`);
 
   let filled = 0;
   let noShift = 0;
   let noData = 0;
-  let errorCount = 0;
 
-  for (let i = 0; i < eligible.length; i++) {
-    const c = eligible[i];
-    const label = `${c.matterNumber || "#" + c.id} (${c.lastName}, ${c.firstName} | Pro ${c.proId})`;
-    if ((i + 1) % 25 === 0) console.log(`  ... ${i + 1}/${eligible.length}`);
-
+  const dbLimit = pLimit(10);
+  const tasks = validClaims.map((c) => dbLimit(async () => {
     const proId = parseInt(c.proId!, 10);
-    if (isNaN(proId)) {
-      errorCount++;
-      continue;
-    }
+    const key = `${proId}|${c.dateOfInjury}`;
+    const label = `${c.matterNumber || "#" + c.id} (${c.lastName}, ${c.firstName} | Pro ${c.proId})`;
 
-    const info = await findShiftPayInfo(proId, c.dateOfInjury, c.partnerName);
+    const info = allResults.get(key);
     if (!info) {
       noShift++;
-      continue;
+      return;
     }
 
-    if (info.applicantRate == null && info.hoursScheduled == null) {
+    if (info.rate == null && info.hours == null) {
       noData++;
-      continue;
+      return;
     }
 
     filled++;
-    const rateStr = info.applicantRate != null ? `$${info.applicantRate.toFixed(2)}/hr` : "n/a";
-    const hoursStr = info.hoursScheduled != null ? `${info.hoursScheduled}h` : "n/a";
+    const rateStr = info.rate != null ? `$${info.rate.toFixed(2)}/hr` : "n/a";
+    const hoursStr = info.hours != null ? `${info.hours}h` : "n/a";
     console.log(`  FILL  ${label} → ${rateStr}, ${hoursStr}`);
 
     if (EXECUTE) {
       const updates: Record<string, any> = {};
-      if (info.applicantRate != null && !c.payRate) {
-        updates.payRate = String(info.applicantRate);
+      if (info.rate != null && !c.payRate) {
+        updates.payRate = String(info.rate);
       }
-      if (info.hoursScheduled != null && !c.shiftLengthHours) {
-        updates.shiftLengthHours = String(info.hoursScheduled);
+      if (info.hours != null && !c.shiftLengthHours) {
+        updates.shiftLengthHours = String(info.hours);
       }
       if (Object.keys(updates).length > 0) {
         await db.update(claims).set(updates).where(eq(claims.id, c.id));
       }
     }
-  }
+  }));
+  await Promise.all(tasks);
+
+  const invalidCount = eligible.length - validClaims.length;
 
   console.log("\n========== SUMMARY ==========");
   console.log(`Eligible claims:    ${eligible.length}`);
+  console.log(`Valid Pro IDs:      ${validClaims.length}`);
   console.log(`Filled:             ${filled}`);
   console.log(`No shift found:     ${noShift}`);
   console.log(`Shift but no data:  ${noData}`);
-  console.log(`Errors:             ${errorCount}`);
+  console.log(`Invalid Pro IDs:    ${invalidCount}`);
 
   if (!EXECUTE && filled > 0) {
     console.log(
@@ -167,12 +173,5 @@ async function run() {
 }
 
 run()
-  .then(() => {
-    pool.end();
-    process.exit(0);
-  })
-  .catch((err) => {
-    console.error("Failed:", err);
-    pool.end();
-    process.exit(1);
-  });
+  .then(() => teardown(0))
+  .catch((err) => { console.error("Failed:", err); teardown(1); });

@@ -1,58 +1,35 @@
-import session from "express-session";
-import type { Express, RequestHandler } from "express";
-import { authStorage } from "./storage";
+import type { Express } from "express";
+import { DevAuthProvider } from "./dev-provider";
+import type { AuthProvider } from "./types";
 
+export type { AuthProvider, AuthUser } from "./types";
 export { authStorage, type IAuthStorage } from "./storage";
 
-const DEV_USER = {
-  id: "local-dev-user",
-  email: "dev@localhost",
-  firstName: "Dev",
-  lastName: "User",
-  profileImageUrl: null,
-};
+let provider: AuthProvider;
 
-export async function setupAuth(app: Express) {
-  app.set("trust proxy", 1);
-  app.use(
-    session({
-      secret: process.env.SESSION_SECRET || "local-dev-secret",
-      resave: false,
-      saveUninitialized: false,
-      cookie: {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-      },
-    })
-  );
-
-  await authStorage.upsertUser(DEV_USER);
-
-  app.get("/api/login", (req: any, res) => {
-    req.session.userId = DEV_USER.id;
-    res.redirect("/");
-  });
-
-  app.get("/api/callback", (_req, res) => res.redirect("/"));
-
-  app.get("/api/logout", (req: any, res) => {
-    req.session.destroy(() => res.redirect("/"));
-  });
+function getProvider(): AuthProvider {
+  if (!provider) {
+    provider = new DevAuthProvider();
+  }
+  return provider;
 }
 
-export const isAuthenticated: RequestHandler = (req: any, res, next) => {
-  if (req.session?.userId) {
-    req.user = { claims: { sub: DEV_USER.id } };
-    return next();
-  }
-  res.status(401).json({ message: "Unauthorized" });
-};
+export async function setupAuth(app: Express) {
+  const p = getProvider();
+  await p.initialize(app);
+}
+
+export const isAuthenticated = (...args: Parameters<AuthProvider["isAuthenticated"]>) =>
+  getProvider().isAuthenticated(...args);
 
 export function registerAuthRoutes(app: Express): void {
-  app.get("/api/auth/user", isAuthenticated, async (req: any, res) => {
+  const auth = getProvider().isAuthenticated;
+
+  app.get("/api/auth/user", auth, async (req, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const { authStorage } = await import("./storage");
+      const userId = req.user?.claims?.sub;
+      if (!userId) return res.status(401).json({ message: "Unauthorized" });
       const user = await authStorage.getUser(userId);
       res.json(user);
     } catch (error) {
