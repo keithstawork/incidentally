@@ -40,6 +40,10 @@ let cachedAnalytics: { data: RiskAnalyticsData; fetchedAt: number } | null = nul
 let inflightPromise: Promise<RiskAnalyticsData> | null = null;
 const CACHE_TTL_MS = 10 * 60 * 1000;
 
+export function invalidateRiskAnalyticsCache(): void {
+  cachedAnalytics = null;
+}
+
 export async function getRiskAnalytics(): Promise<RiskAnalyticsData> {
   if (cachedAnalytics && Date.now() - cachedAnalytics.fetchedAt < CACHE_TTL_MS) {
     return cachedAnalytics.data;

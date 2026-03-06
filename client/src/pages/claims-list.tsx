@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Link, useLocation } from "wouter";
 import {
@@ -23,45 +23,13 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
+import { STATUS_BADGE_VARIANTS, STAGE_LABELS, STAGE_BADGE_VARIANTS } from "@/lib/constants";
+import { formatDate, MS_PER_DAY } from "@/lib/formatters";
 import type { Claim } from "@shared/schema";
-
-const STATUS_BADGE_VARIANTS: Record<string, string> = {
-  Open: "bg-[#C4A27F]/15 text-[#76614C] border-[#C4A27F]/30",
-  Closed: "bg-[#3B5747]/15 text-[#23342B] border-[#3B5747]/30",
-  Denied: "bg-[#EC5A53]/15 text-[#8E3632] border-[#EC5A53]/30",
-  "Incident Only": "bg-[#576270]/10 text-[#576270] border-[#576270]/20",
-  "Incident Report": "bg-[#576270]/10 text-[#576270] border-[#576270]/20",
-};
-
-const STAGE_LABELS: Record<string, string> = {
-  intake: "Intake",
-  active_claim: "Active Claim",
-  litigation: "Litigation",
-  settled: "Settled",
-  closed: "Closed",
-};
-
-const STAGE_BADGE_VARIANTS: Record<string, string> = {
-  intake: "bg-[#294EB2]/15 text-[#192F6B] border-[#294EB2]/30",
-  active_claim: "bg-[#3B5747]/15 text-[#23342B] border-[#3B5747]/30",
-  litigation: "bg-[#EC5A53]/15 text-[#8E3632] border-[#EC5A53]/30",
-  settled: "bg-[#C4A27F]/15 text-[#76614C] border-[#C4A27F]/30",
-  closed: "bg-[#576270]/10 text-[#576270] border-[#576270]/20",
-};
-
-
-function formatDate(date: string | null | undefined): string {
-  if (!date) return "-";
-  return new Date(date).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "2-digit",
-  });
-}
 
 function claimAge(dateOfInjury: string): string {
   const days = Math.floor(
-    (Date.now() - new Date(dateOfInjury).getTime()) / (1000 * 60 * 60 * 24)
+    (Date.now() - new Date(dateOfInjury).getTime()) / MS_PER_DAY
   );
   if (days < 30) return `${days}d`;
   if (days < 365) return `${Math.floor(days / 30)}mo`;
@@ -116,8 +84,8 @@ const COLUMNS: ColumnDef[] = [
     label: "Injury Date",
     defaultWidth: 85,
     minWidth: 70,
-    getValue: (c) => formatDate(c.dateOfInjury),
-    render: (c) => <span className="text-muted-foreground">{formatDate(c.dateOfInjury)}</span>,
+    getValue: (c) => formatDate(c.dateOfInjury, "2-digit"),
+    render: (c) => <span className="text-muted-foreground">{formatDate(c.dateOfInjury, "2-digit")}</span>,
     filterable: false,
   },
   {
@@ -310,6 +278,7 @@ function ColumnFilterPopover({
 
 export default function ClaimsList() {
   const [, navigate] = useLocation();
+  const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [columnFilters, setColumnFilters] = useState<Record<string, Set<string>>>({});
   const [columnOrder, setColumnOrder] = useState<string[]>(() => COLUMNS.map((c) => c.key));
@@ -841,6 +810,7 @@ export default function ClaimsList() {
                           data-testid={`row-claim-${claim.id}`}
                           ref={rowVirtualizer.measureElement}
                           data-index={virtualRow.index}
+                          onMouseEnter={() => qc.prefetchQuery({ queryKey: ["/api/claims", String(claim.id), "detail"], queryFn: () => fetch(`/api/claims/${claim.id}/detail`, { credentials: "include" }).then((r) => r.json()), staleTime: 30_000 })}
                           onClick={() => navigate(`/claims/${claim.id}`)}
                         >
                           {orderedColumns.map((col) => (

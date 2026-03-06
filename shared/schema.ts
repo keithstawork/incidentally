@@ -162,6 +162,8 @@ export const claims = pgTable("claims", {
   dateOfInjuryIdx: index("claims_doi_idx").on(table.dateOfInjury),
   workerTypeIdx: index("claims_worker_type_idx").on(table.workerType),
   stageIdx: index("claims_stage_idx").on(table.stage),
+  tpaClaimIdIdx: index("claims_tpa_claim_id_idx").on(table.tpaClaimId),
+  partnerNameIdx: index("claims_partner_name_idx").on(table.partnerName),
 }));
 
 export const claimNotes = pgTable("claim_notes", {
@@ -304,6 +306,47 @@ export const insertPolicySchema = createInsertSchema(insurancePolicies).omit({
   updatedAt: true,
 });
 
+// ── Documents ────────────────────────────────────────────────────────────────
+
+export const documentCategoryEnum = pgEnum("document_category", [
+  "medical", "legal", "adjuster", "insurance", "internal", "photo", "other",
+]);
+
+export const documentSourceEnum = pgEnum("document_source", [
+  "upload", "email", "system",
+]);
+
+export const documents = pgTable("documents", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  claimId: integer("claim_id").notNull().references(() => claims.id),
+  filename: varchar("filename", { length: 500 }).notNull(),
+  mimeType: varchar("mime_type", { length: 100 }),
+  sizeBytes: integer("size_bytes"),
+  category: documentCategoryEnum("category").notNull(),
+  source: documentSourceEnum("source").default("upload").notNull(),
+  storagePath: varchar("storage_path", { length: 1000 }).notNull(),
+  uploadedBy: varchar("uploaded_by").references(() => users.id),
+  emailMessageId: varchar("email_message_id", { length: 500 }),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow(),
+  deletedAt: timestamp("deleted_at"),
+}, (table) => ({
+  claimIdIdx: index("documents_claim_id_idx").on(table.claimId),
+  categoryIdx: index("documents_category_idx").on(table.category),
+}));
+
+export const documentsRelations = relations(documents, ({ one }) => ({
+  claim: one(claims, { fields: [documents.claimId], references: [claims.id] }),
+}));
+
+export const insertDocumentSchema = createInsertSchema(documents).omit({
+  id: true,
+  createdAt: true,
+  deletedAt: true,
+});
+
+// ── Type exports ─────────────────────────────────────────────────────────────
+
 export type Claim = typeof claims.$inferSelect;
 export type InsertClaim = z.infer<typeof insertClaimSchema>;
 export type ClaimNote = typeof claimNotes.$inferSelect;
@@ -317,3 +360,5 @@ export type Company = typeof companies.$inferSelect;
 export type InsertCompany = z.infer<typeof insertCompanySchema>;
 export type InsurancePolicy = typeof insurancePolicies.$inferSelect;
 export type InsertPolicy = z.infer<typeof insertPolicySchema>;
+export type Document = typeof documents.$inferSelect;
+export type InsertDocument = z.infer<typeof insertDocumentSchema>;

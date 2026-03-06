@@ -3,6 +3,7 @@ import {
   claimNotes,
   claimStatusHistory,
   companies,
+  documents,
   insurancePolicies,
   type Claim,
   type InsertClaim,
@@ -12,6 +13,8 @@ import {
   type InsertClaimStatusHistory,
   type Company,
   type InsertCompany,
+  type Document,
+  type InsertDocument,
   type InsurancePolicy,
   type InsertPolicy,
 } from "@shared/schema";
@@ -59,7 +62,6 @@ export interface IStorage {
   getClaim(id: number): Promise<Claim | undefined>;
   createClaim(claim: InsertClaim): Promise<Claim>;
   updateClaim(id: number, claim: Partial<InsertClaim>): Promise<Claim | undefined>;
-  deleteClaim(id: number): Promise<void>;
   getClaimNotes(claimId: number): Promise<ClaimNote[]>;
   createClaimNote(note: InsertClaimNote): Promise<ClaimNote>;
   updateClaimNote(id: number, updates: Partial<InsertClaimNote>): Promise<ClaimNote | undefined>;
@@ -77,6 +79,10 @@ export interface IStorage {
     firstName?: string;
     lastName?: string;
   }): Promise<Claim | undefined>;
+  getClaimDocuments(claimId: number): Promise<Document[]>;
+  createDocument(doc: InsertDocument): Promise<Document>;
+  getDocumentByIdAndClaimId(documentId: number, claimId: number): Promise<Document | undefined>;
+  updateDocument(id: number, updates: Partial<InsertDocument>): Promise<Document | undefined>;
 }
 
 export interface ClaimFilters {
@@ -182,38 +188,23 @@ export class DatabaseStorage implements IStorage {
     const { matterNumber, tpaClaimId, proId, dateOfInjury, firstName, lastName } = criteria;
     const base = and(isNull(claims.deletedAt));
 
-    if (matterNumber?.trim()) {
-      const [c] = await db.select().from(claims).where(and(base, eq(claims.matterNumber, matterNumber.trim()))).limit(1);
-      if (c) return c;
-    }
-    if (tpaClaimId?.trim()) {
-      const [c] = await db.select().from(claims).where(and(base, eq(claims.tpaClaimId, tpaClaimId.trim()))).limit(1);
-      if (c) return c;
-    }
-    if (proId?.trim() && dateOfInjury) {
-      const [c] = await db
-        .select()
-        .from(claims)
-        .where(and(base, eq(claims.proId, proId.trim()), eq(claims.dateOfInjury, dateOfInjury)))
-        .limit(1);
-      if (c) return c;
-    }
-    if (firstName?.trim() && lastName?.trim() && dateOfInjury) {
-      const [c] = await db
-        .select()
-        .from(claims)
-        .where(
-          and(
-            base,
-            sql`LOWER(TRIM(first_name)) = LOWER(TRIM(${firstName}))`,
-            sql`LOWER(TRIM(last_name)) = LOWER(TRIM(${lastName}))`,
-            eq(claims.dateOfInjury, dateOfInjury)
-          )
-        )
-        .limit(1);
-      if (c) return c;
-    }
-    return undefined;
+    const queries: Promise<Claim | undefined>[] = [
+      matterNumber?.trim()
+        ? db.select().from(claims).where(and(base, eq(claims.matterNumber, matterNumber.trim()))).limit(1).then(r => r[0])
+        : Promise.resolve(undefined),
+      tpaClaimId?.trim()
+        ? db.select().from(claims).where(and(base, eq(claims.tpaClaimId, tpaClaimId.trim()))).limit(1).then(r => r[0])
+        : Promise.resolve(undefined),
+      proId?.trim() && dateOfInjury
+        ? db.select().from(claims).where(and(base, eq(claims.proId, proId.trim()), eq(claims.dateOfInjury, dateOfInjury))).limit(1).then(r => r[0])
+        : Promise.resolve(undefined),
+      firstName?.trim() && lastName?.trim() && dateOfInjury
+        ? db.select().from(claims).where(and(base, sql`LOWER(TRIM(first_name)) = LOWER(TRIM(${firstName}))`, sql`LOWER(TRIM(last_name)) = LOWER(TRIM(${lastName}))`, eq(claims.dateOfInjury, dateOfInjury))).limit(1).then(r => r[0])
+        : Promise.resolve(undefined),
+    ];
+
+    const [byMatter, byTpa, byProDoi, byNameDoi] = await Promise.all(queries);
+    return byMatter ?? byTpa ?? byProDoi ?? byNameDoi;
   }
 
   async createClaim(claim: InsertClaim): Promise<Claim> {
@@ -267,25 +258,25 @@ export class DatabaseStorage implements IStorage {
     return updated || undefined;
   }
 
-  async deleteClaim(id: number): Promise<void> {
-    await db.delete(claims).where(eq(claims.id, id));
-  }
-
   async mergeClaims(
     primaryId: number,
     secondaryId: number,
     resolvedFields: Record<string, any>,
     mergedBy: string,
   ): Promise<Claim | undefined> {
-    const primary = await this.getClaim(primaryId);
-    const secondary = await this.getClaim(secondaryId);
+    const [primary, secondary] = await Promise.all([
+      this.getClaim(primaryId),
+      this.getClaim(secondaryId),
+    ]);
     if (!primary || !secondary) return undefined;
 
     const mergeData: Record<string, any> = { ...resolvedFields, updatedAt: new Date() };
     const [updated] = await db.update(claims).set(mergeData).where(eq(claims.id, primaryId)).returning();
 
-    await db.update(claimNotes).set({ claimId: primaryId }).where(eq(claimNotes.claimId, secondaryId));
-    await db.update(claimStatusHistory).set({ claimId: primaryId }).where(eq(claimStatusHistory.claimId, secondaryId));
+    await Promise.all([
+      db.update(claimNotes).set({ claimId: primaryId }).where(eq(claimNotes.claimId, secondaryId)),
+      db.update(claimStatusHistory).set({ claimId: primaryId }).where(eq(claimStatusHistory.claimId, secondaryId)),
+    ]);
 
     await this.softDeleteClaim(secondaryId, mergedBy, `Merged into incident ${updated.matterNumber || `#${primaryId}`}`);
 
@@ -346,6 +337,43 @@ export class DatabaseStorage implements IStorage {
     return newEntry;
   }
 
+  async getClaimDocuments(claimId: number): Promise<Document[]> {
+    return await db
+      .select()
+      .from(documents)
+      .where(and(eq(documents.claimId, claimId), isNull(documents.deletedAt)))
+      .orderBy(desc(documents.createdAt));
+  }
+
+  async createDocument(doc: InsertDocument): Promise<Document> {
+    const [created] = await db.insert(documents).values(doc).returning();
+    return created;
+  }
+
+  async getDocumentByIdAndClaimId(documentId: number, claimId: number): Promise<Document | undefined> {
+    const [row] = await db
+      .select()
+      .from(documents)
+      .where(
+        and(
+          eq(documents.id, documentId),
+          eq(documents.claimId, claimId),
+          isNull(documents.deletedAt),
+        ),
+      )
+      .limit(1);
+    return row ?? undefined;
+  }
+
+  async updateDocument(id: number, updates: Partial<InsertDocument>): Promise<Document | undefined> {
+    const [updated] = await db
+      .update(documents)
+      .set(updates)
+      .where(eq(documents.id, id))
+      .returning();
+    return updated ?? undefined;
+  }
+
   async searchClaims(query: string): Promise<Claim[]> {
     const trimmed = query.trim();
     if (!trimmed) return [];
@@ -361,6 +389,26 @@ export class DatabaseStorage implements IStorage {
       )
       .orderBy(sql`similarity(${fullName}, ${trimmed}) DESC`, desc(claims.createdAt))
       .limit(50);
+  }
+
+  async getSplashStats(): Promise<{ openIncidents: number; inLitigation: number; totalIncurred: number; newThisMonth: number }> {
+    const notDeleted = sql`deleted_at IS NULL`;
+    const incurredExpr = sql`GREATEST(COALESCE(losses_paid,0), COALESCE(medical_total,0)) + COALESCE(loss_adjusting_expenses,0) + COALESCE(total_outstanding,0) + COALESCE(total_payments,0)`;
+    const result = await db.execute(sql`
+      SELECT
+        COUNT(*) FILTER (WHERE claim_status = 'Open')::int AS open_incidents,
+        COUNT(*) FILTER (WHERE litigated = true OR stage = 'litigation')::int AS in_litigation,
+        COALESCE(SUM(${incurredExpr}) FILTER (WHERE claim_status = 'Open'),0)::float AS total_incurred,
+        COUNT(*) FILTER (WHERE created_at >= date_trunc('month', CURRENT_DATE))::int AS new_this_month
+      FROM claims WHERE ${notDeleted}
+    `);
+    const r = (result as any).rows[0];
+    return {
+      openIncidents: r.open_incidents,
+      inLitigation: r.in_litigation,
+      totalIncurred: r.total_incurred,
+      newThisMonth: r.new_this_month,
+    };
   }
 
   async getDashboardStats(): Promise<DashboardStats> {

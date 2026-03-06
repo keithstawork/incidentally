@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Link } from "wouter";
+import { formatCurrency } from "@/lib/formatters";
 import {
   BarChart,
   Bar,
@@ -60,14 +61,7 @@ function fmt(n: number): string {
   }).format(n);
 }
 
-function fmtFull(n: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(n);
-}
+const fmtFull = (n: number) => formatCurrency(n);
 
 function SummaryCards({ bucket, title }: { bucket: FinancialBucket; title: string }) {
   return (

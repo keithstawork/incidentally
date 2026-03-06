@@ -1,7 +1,40 @@
+import { useState, useEffect } from "react";
 import { Shield, BarChart3, FileSearch, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+
+function formatCurrency(value: number): string {
+  if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 1_000) return `$${(value / 1_000).toFixed(0)}K`;
+  return `$${value.toFixed(0)}`;
+}
+
+interface SplashStats {
+  openIncidents: number;
+  inLitigation: number;
+  totalIncurred: number;
+  newThisMonth: number;
+}
 
 export default function Landing() {
+  const [stats, setStats] = useState<SplashStats | null>(null);
+
+  useEffect(() => {
+    fetch("/api/public/stats")
+      .then((r) => r.json())
+      .then(setStats)
+      .catch(() => {});
+  }, []);
+
+  const statCards = stats
+    ? [
+        { label: "Open Incidents", value: String(stats.openIncidents) },
+        { label: "In Litigation", value: String(stats.inLitigation) },
+        { label: "Total Incurred", value: formatCurrency(stats.totalIncurred) },
+        { label: "New This Month", value: String(stats.newThisMonth) },
+      ]
+    : null;
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <header className="sticky top-0 z-50 border-b bg-background/80 backdrop-blur-md">
@@ -23,53 +56,43 @@ export default function Landing() {
           <div className="grid gap-12 lg:grid-cols-2 lg:gap-16 items-center">
             <div className="flex flex-col gap-6">
               <h1 className="font-serif text-4xl font-bold tracking-tight lg:text-5xl">
-                <span className="text-foreground">Claims</span>{" "}
-                <span className="text-primary">Simplified</span>
+                <span className="text-foreground">Claim</span>{" "}
+                <span className="text-primary">Management</span>
               </h1>
               <p className="text-lg text-muted-foreground leading-relaxed">
                 Track injury claims from initial intake through resolution.
-                Replace your spreadsheets with a purpose-built pipeline that
-                Trust & Safety and Legal teams actually want to use.
+                Replaces spreadsheets with a purpose-built pipeline that you
+                actually want to use.
               </p>
-              <div className="flex flex-wrap gap-3">
-                <Button size="lg" asChild data-testid="button-get-started">
-                  <a href="/api/login">Get Started</a>
-                </Button>
-              </div>
-              <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#3B5747]" />
-                  Internal tool
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-[#3B5747]" />
-                  No setup required
-                </span>
-              </div>
             </div>
             <div className="relative hidden lg:block">
               <div className="rounded-md border bg-card p-6 space-y-4">
                 <div className="flex items-center gap-2 text-sm font-medium">
                   <BarChart3 className="h-4 w-4 text-primary" />
-                  Dashboard Preview
+                  Live Overview
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { label: "Open Claims", value: "47" },
-                    { label: "In Litigation", value: "8" },
-                    { label: "Total Incurred", value: "$1.2M" },
-                    { label: "New This Week", value: "5" },
-                  ].map((stat) => (
-                    <div
-                      key={stat.label}
-                      className="rounded-md border border-card-border bg-background p-3"
-                    >
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                        {stat.label}
-                      </p>
-                      <p className="text-xl font-semibold">{stat.value}</p>
-                    </div>
-                  ))}
+                  {statCards
+                    ? statCards.map((stat) => (
+                        <div
+                          key={stat.label}
+                          className="rounded-md border border-card-border bg-background p-3"
+                        >
+                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            {stat.label}
+                          </p>
+                          <p className="text-xl font-semibold">{stat.value}</p>
+                        </div>
+                      ))
+                    : Array.from({ length: 4 }).map((_, i) => (
+                        <div
+                          key={i}
+                          className="rounded-md border border-card-border bg-background p-3 space-y-2"
+                        >
+                          <Skeleton className="h-3 w-20" />
+                          <Skeleton className="h-6 w-12" />
+                        </div>
+                      ))}
                 </div>
               </div>
             </div>
@@ -117,7 +140,7 @@ export default function Landing() {
 
       <footer className="border-t py-6">
         <div className="mx-auto max-w-6xl px-4 text-center text-xs text-muted-foreground">
-          Instawork Incidentally &mdash; Claims Simplified
+          Instawork Incidentally &mdash; Claim Management
         </div>
       </footer>
     </div>
