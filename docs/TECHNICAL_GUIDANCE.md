@@ -14,6 +14,7 @@
 **File storage:** AWS S3 (production documents), local `uploads/` (dev fallback)
 **Auth:** express-session placeholder → Google Workspace OAuth (planned, task 2.3)
 **Validation:** Zod schemas in `shared/schema.ts` — imported by both frontend and backend
+**AI (Phase 4):** OpenAI (company account) — shared LLM client with retries + cost logging; see `PROJECT_PATTERNS.md` for the standard LLM client pattern
 
 ---
 
@@ -120,10 +121,41 @@ Applied via Tailwind CSS variables. Key colors:
 
 ---
 
+## Phase 4: AI Agent Architecture (planned)
+
+**Goal:** The system ingests all available claim information and either surfaces next-step prompts to the user or takes those steps autonomously.
+
+**Data available to agents:**
+- PostgreSQL: full claim record (all fields, notes, history, financials)
+- S3/documents: uploaded files (medical records, correspondence, legal docs)
+- Redshift: Pro shift history, earnings, worker classification, account history
+- External: TPA system (future), carrier portals (future)
+
+**Planned agent types:**
+
+| Agent | Trigger | What it does |
+|---|---|---|
+| Document extractor | Document uploaded | Extract key fields (injury date, diagnosis, treatment, dollar amounts) → surface for user confirmation → write confirmed fields to claim |
+| Claim summarizer | On demand / claim open | Generate plain-English summary of claim state, history, gaps, and urgency |
+| Next-step prompter | User Home load | For each open claim: what needs to happen next, ranked by urgency |
+| Workflow trigger | Scheduled / event-driven | Flag overdue items, reserve review needs, litigation criteria met |
+| Action agent | User approval | Draft letters, request TPA updates, flag reserves — always with confirmation before executing |
+
+**Design principles for agents:**
+- **Always confirm before writing** — agents suggest, users approve (at least in Phase 4.1–4.5)
+- **Show your reasoning** — every prompt includes why the agent is suggesting it
+- **Graceful fallback** — if LLM fails or returns low-confidence output, surface for manual review rather than silently failing
+- **Cost-conscious** — use `gpt-4o-mini` by default; only escalate to `gpt-4o` for complex reasoning tasks; log token usage
+- **One shared LLM client** — all agent calls go through `server/lib/llm-client.ts` (to be created in task 4.1)
+
+**Key dependency:** Agents need auth + roles (task 3.3) before autonomous actions can be role-gated properly.
+
+---
+
 ## Constraints
 
 - Redshift SSO expires. When Redshift queries fail, run `aws sso login`.
 - `uploads/` is gitignored — local dev only. In production, all documents go to S3.
 - Pro data from Redshift is read-only. Never write back.
-- No AI document summarization — explicitly out of scope.
+- No AI document processing in Phase 2 — deferred to Phase 4.
 - Raw data exports (`.csv`, `.xlsx`) are gitignored — never commit.

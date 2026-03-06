@@ -58,9 +58,25 @@ Status: ✅ Done · 🔧 In progress · ⬜ Not started · 🚫 Blocked
 
 ---
 
+## Phase 4 — AI Agents (planned)
+
+**Goal:** Evolve from a data management tool into an AI-powered claims assistant. The system ingests all available claim information and either prompts users on next steps or takes those steps autonomously.
+
+| # | Task | Status | Notes |
+|---|------|--------|-------|
+| 4.1 | LLM integration layer — shared client with retries, cost logging, model config | ⬜ | Foundation for all agent tasks; use company OpenAI account |
+| 4.2 | Document field extraction — when a doc is uploaded, extract key fields (dates, diagnoses, treatment, amounts) and surface for user confirmation | ⬜ | Depends on 2.2 (Drive import) for volume |
+| 4.3 | Claim context summarizer — generate a plain-English summary of each claim's current state, history, and missing information | ⬜ | Powers the next-step prompter |
+| 4.4 | Next-step prompter on User Home — surface what each open claim needs right now, ranked by urgency | ⬜ | Depends on 4.3; replaces static User Home placeholder |
+| 4.5 | Proactive workflow triggers — flag overdue items, reserve review needs, litigation criteria met | ⬜ | Rule-based first, LLM-enhanced later |
+| 4.6 | Autonomous actions with confirmation — draft letters, request TPA updates, flag reserves, with user approval before executing | ⬜ | Depends on 4.4 + 3.3 (auth/roles) |
+| 4.7 | Gmail ingestion agent — monitor inbox for claim-related emails, auto-attach to correct incident | ⬜ | Depends on 3.5 |
+
+---
+
 ## Ideas / Future
 
-- Automated claim routing based on injury type and state
-- SLA tracking and overdue alerts
-- Settlement calculator / reserve recommendations
+- SLA tracking and overdue alerts (precursor to 4.5)
+- Settlement calculator / reserve recommendations (AI-assisted)
 - Integration with TPA (Third Party Administrator) systems
+- Automated claim routing based on injury type and state

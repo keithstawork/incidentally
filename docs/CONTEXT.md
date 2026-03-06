@@ -8,6 +8,8 @@
 
 Incidentally is Instawork's internal injury claims management tool for Trust & Safety and Legal teams. It tracks workers' compensation and occupational accident claims from initial intake through resolution — replacing spreadsheets with a purpose-built pipeline. It integrates live with Instawork's Pro data (Redshift/Falcon) to auto-populate claim details, highlight worked shifts on the injury date calendar, and surface Pro history.
 
+**Strategic direction:** Evolve from a data management tool into an AI-powered claims assistant. The system will ingest all available claim information (documents, Redshift Pro data, claim history, financials) and use it to proactively prompt users on next steps — and eventually take those steps autonomously via agentic workflows. The goal is that a T&S agent or paralegal opens a claim and is told exactly what needs to happen next, rather than having to reconstruct context from scratch each time.
+
 ---
 
 ## Current State
@@ -43,6 +45,12 @@ See TRACKER.md Phase 1 for full completed task list.
 - Document library: Gmail ingestion (Phase 3)
 - More Redshift data integrations
 
+**Phase 4 — AI Agents (future):**
+- Document ingestion + field extraction (read uploaded docs, auto-populate claim fields)
+- Next-step prompter on User Home (surface what each open claim needs right now)
+- Proactive workflow triggers (overdue flags, reserve reviews, litigation criteria)
+- Autonomous actions with user confirmation (draft letters, request TPA updates, flag reserves)
+
 ---
 
 ## Key Decisions
@@ -52,7 +60,7 @@ See TRACKER.md Phase 1 for full completed task list.
 - **Redshift via Data API** — No persistent connection; queries run per-request via SSO-authenticated AWS profile.
 - **S3 for document storage** — Presigned URLs for downloads. Local `uploads/` used in dev.
 - **pg_trgm for fuzzy Pro search** — Trigram similarity for typo-tolerant name matching in local DB; prefix-truncation ILIKE for Redshift.
-- **No AI doc summarization** — Explicitly out of scope (decided during document library implementation).
+- **No AI doc summarization in Phase 2** — Deferred, not permanently ruled out. Phase 4 will include document field extraction via LLM once the document library is stable.
 
 ---
 
@@ -62,7 +70,7 @@ See TRACKER.md Phase 1 for full completed task list.
 2. Redshift SSO sessions expire (~8 hours) — re-run `aws sso login` when Redshift queries fail with auth errors
 3. Pro data from Redshift is **read-only** — never write back
 4. `uploads/` is gitignored — local dev only, not for production
-5. No AI document summarization in scope
+5. No AI document processing in Phase 2 — deferred to Phase 4 (AI Agents)
 
 ---
 
