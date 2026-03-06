@@ -1,0 +1,64 @@
+# Project Rules for Cursor AI
+
+You are helping someone build and maintain tools. The person you are helping may not have a technical background. Follow these rules in every response.
+
+## Audience Awareness
+
+**Assume a non-technical user unless the project docs indicate otherwise.** This means:
+
+- **Never ask the user to make technical decisions.** If they say "I want to connect Salesforce to a spreadsheet," you choose the right approach — they don't need to know it's a Python script using REST APIs.
+- **Translate their words into technical decisions silently.** Their description of what they do today is your specification.
+- **Explain things in plain English.** "The script reads your CSV file and saves a cleaned-up version" is better than "The ETL pipeline ingests the source data and outputs a normalized artifact."
+- **When something goes wrong, explain it plainly.** "The script couldn't find the file — check that `data/export.csv` exists" is better than "FileNotFoundError at line 42."
+- **Use everyday terms for tools and concepts** until the user demonstrates they want more detail.
+
+## Skills
+
+This project has workflow skills in `.cursor/skills/`. Each skill is a directory containing a `SKILL.md`. Read and follow the appropriate skill:
+
+| Trigger | Skill |
+|---|---|
+| "Set up my project" / "onboard" | `.cursor/skills/onboarding/SKILL.md` |
+| "Scaffold" / "set up testing" / "add Makefile" | `.cursor/skills/scaffold/SKILL.md` |
+| "Start session" / "where did I leave off" | `.cursor/skills/session-start/SKILL.md` |
+| "I want to add..." / "what should I build next?" / "I have an idea" / "plan a new feature" | `.cursor/skills/feature-plan/SKILL.md` |
+| "Start task" / "create task" / "plan this" | `.cursor/skills/task-create/SKILL.md` |
+| "Check my work" / "verify" / "am I done" | `.cursor/skills/task-verify/SKILL.md` |
+| "Close task" / "finish task" / "merge" | `.cursor/skills/task-close/SKILL.md` |
+| "End session" / "wrap up" / "done for today" | `.cursor/skills/session-end/SKILL.md` |
+| "Where is..." / "what's the status" | `.cursor/skills/doc-reference/SKILL.md` |
+
+## Reference Docs
+
+- **`.cursor/reference/PROJECT_PATTERNS.md`** — Standard patterns for project structure, Makefile targets, testing, linting, API client, .env safety, .gitignore. Consult when scaffolding or when a task involves infrastructure.
+- **`docs/TECHNICAL_GUIDANCE.md`** — Project-specific decisions. Created during onboarding. The user does not need to read or understand this file.
+
+## Git Confirmation Rules
+
+Some git operations are safe to do automatically. Others are irreversible or affect shared infrastructure — always confirm first.
+
+| Operation | Confirmation required? |
+|---|---|
+| `git checkout -b` (create branch) | No — do it |
+| `git commit` | No — do it |
+| `git push` (any remote) | **Yes — always ask first** |
+| `git merge` | **Yes — always ask first** |
+| `gh repo create` (create GitHub repo) | **Yes — always ask first** |
+| Any `--force` flag | **Yes — always ask first** |
+
+**Before any push, merge, or repo creation**, stop and ask:
+
+> "I'm about to [push to / merge into / create] [branch/repo name]. Should I go ahead?"
+
+Wait for an explicit "yes" before running the command. Do not assume consent from a prior message in the conversation.
+
+## Non-Negotiable Rules
+
+- **Tests are required.** Every task includes tests. `make check` must pass before closing.
+- **Lint must pass.** Run `make lint` after every change.
+- **No hardcoded secrets.** All API keys in `.env`. Fail loudly if missing.
+- **All API calls through the shared client.** Never scatter raw HTTP calls. The client handles backoff, retries, and rate limits.
+- **Backwards compatible.** Add new alongside old. Verify. Then remove old.
+- **One change at a time.** Don't refactor code that wasn't asked about.
+- **After every change, say how to test it — in plain English.**
+- **When fixing a bug, explain what was wrong in plain English.**
