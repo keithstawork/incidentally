@@ -1,9 +1,11 @@
-import { db, pool } from "../db";
+import { db } from "../db";
 import { claims } from "@shared/schema";
 import { executeRedshiftQuery } from "../redshift";
 import { sql } from "drizzle-orm";
 import * as fs from "fs";
 import * as path from "path";
+import pLimit from "p-limit";
+import { normalize, nameSimilarity, teardown } from "./lib/shared";
 
 interface ClaimRow {
   id: number;
@@ -101,22 +103,6 @@ async function getWorkersOnShift(doi: string, partnerName: string | null): Promi
   }
 }
 
-function normalize(s: string): string {
-  return s.toLowerCase().replace(/[^a-z]/g, "");
-}
-function nameSimilarity(a: string, b: string): number {
-  const an = normalize(a);
-  const bn = normalize(b);
-  if (an === bn) return 1;
-  if (an.includes(bn) || bn.includes(an)) return 0.8;
-  let matches = 0;
-  const shorter = an.length <= bn.length ? an : bn;
-  const longer = an.length > bn.length ? an : bn;
-  for (const ch of shorter) {
-    if (longer.indexOf(ch) !== -1) matches++;
-  }
-  return matches / Math.max(an.length, bn.length);
-}
 
 /** Score shift workers by name match; return definitive match and/or best near match. */
 function matchAndNearFromShift(
@@ -179,7 +165,9 @@ async function run() {
   const rows: ReviewRow[] = [];
 
   let searchCount = 0;
-  for (const [nameKey, claimGroup] of nameMap) {
+  const limit = pLimit(5);
+  const nameEntries = Array.from(nameMap.entries());
+  const groupTasks = nameEntries.map(([nameKey, claimGroup]) => limit(async () => {
     const [fn, ln] = nameKey.split("|");
     searchCount++;
     if (searchCount % 25 === 0) console.log(`  ... ${searchCount}/${nameMap.size}`);
@@ -258,9 +246,10 @@ async function run() {
         }
       }
     }
-  }
+  }));
+  await Promise.all(groupTasks);
 
-  const outPath = "/Users/keith/Downloads/pro-id-manual-review.csv";
+  const outPath = path.join(process.cwd(), "pro-id-manual-review.csv");
   fs.writeFileSync(outPath, csvLines.join("\n"));
   console.log(`\nWrote ${csvLines.length - 1} rows to ${outPath}`);
 
@@ -427,5 +416,5 @@ function buildReviewHtml(rows: ReviewRow[]): string {
 }
 
 run()
-  .then(() => { pool.end(); process.exit(0); })
-  .catch((err) => { console.error(err); pool.end(); process.exit(1); });
+  .then(() => teardown(0))
+  .catch((err) => { console.error(err); teardown(1); });

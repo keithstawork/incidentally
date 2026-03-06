@@ -5,13 +5,12 @@
  *   - Exactly one worker on that shift with loose name match (fn≥0.8, ln≥0.9).
  * Near matches (e.g. score 0.6–0.8) are never written to the DB — they are logged for manual review only.
  */
-import { db, pool } from "../db";
+import { db } from "../db";
 import { claims } from "@shared/schema";
 import { executeRedshiftQuery } from "../redshift";
 import { sql, eq } from "drizzle-orm";
-import { pros } from "@shared/schema";
-
-const EXECUTE = process.argv.includes("--execute");
+import pLimit from "p-limit";
+import { EXECUTE, sanitize, normalize, nameSimilarity, upsertPro, teardown } from "./lib/shared";
 
 interface ClaimRow {
   id: number;
@@ -48,28 +47,6 @@ interface ShiftWorker {
   lastActive: string | null;
 }
 
-function sanitize(s: string): string {
-  return s.replace(/'/g, "''").trim();
-}
-
-function normalize(s: string): string {
-  return s.toLowerCase().replace(/[^a-z]/g, "");
-}
-
-function nameSimilarity(a: string, b: string): number {
-  const an = normalize(a);
-  const bn = normalize(b);
-  if (an === bn) return 1;
-  if (an.includes(bn) || bn.includes(an)) return 0.8;
-  let matches = 0;
-  const shorter = an.length <= bn.length ? an : bn;
-  const longer = an.length > bn.length ? an : bn;
-  for (const ch of shorter) {
-    const idx = longer.indexOf(ch);
-    if (idx !== -1) matches++;
-  }
-  return matches / Math.max(an.length, bn.length);
-}
 
 async function findShiftWorkers(dateOfInjury: string, partnerName: string | null): Promise<ShiftWorker[]> {
   const safeDate = sanitize(dateOfInjury);
@@ -129,8 +106,8 @@ async function findShiftWorkers(dateOfInjury: string, partnerName: string | null
   }));
 }
 
-async function upsertPro(w: ShiftWorker) {
-  await db.insert(pros).values({
+function toProUpsertData(w: ShiftWorker) {
+  return {
     proId: w.workerId,
     name: w.name,
     givenName: w.givenName,
@@ -149,34 +126,9 @@ async function upsertPro(w: ShiftWorker) {
     w2Status: w.w2Status,
     backgroundCheckStatus: w.backgroundCheckStatus,
     noshowCount: w.noshowCount,
-    dateCreated: w.dateCreated ? new Date(w.dateCreated) : null,
-    lastActive: w.lastActive ? new Date(w.lastActive) : null,
-    syncedAt: new Date(),
-  }).onConflictDoUpdate({
-    target: pros.proId,
-    set: {
-      name: sql`excluded.name`,
-      givenName: sql`excluded.given_name`,
-      familyName: sql`excluded.family_name`,
-      email: sql`excluded.email`,
-      phone: sql`excluded.phone`,
-      address: sql`excluded.address`,
-      locality: sql`excluded.locality`,
-      state: sql`excluded.state`,
-      stateCode: sql`excluded.state_code`,
-      zipcode: sql`excluded.zipcode`,
-      workerStatus: sql`excluded.worker_status`,
-      workerLevel: sql`excluded.worker_level`,
-      w2Eligible: sql`excluded.w2_eligible`,
-      w2Employer: sql`excluded.w2_employer`,
-      w2Status: sql`excluded.w2_status`,
-      backgroundCheckStatus: sql`excluded.background_check_status`,
-      noshowCount: sql`excluded.noshow_count`,
-      dateCreated: sql`excluded.date_created`,
-      lastActive: sql`excluded.last_active`,
-      syncedAt: sql`excluded.synced_at`,
-    },
-  });
+    dateCreated: w.dateCreated,
+    lastActive: w.lastActive,
+  };
 }
 
 async function run() {
@@ -200,52 +152,49 @@ async function run() {
   let shiftAmbiguous = 0;
   let noShiftData = 0;
   let errorCount = 0;
+  let processed = 0;
   const stillUnresolved: { claim: ClaimRow; reason: string; candidates?: string[]; nearMatch?: string[] }[] = [];
 
-  for (let i = 0; i < missing.length; i++) {
-    const claim = missing[i];
+  const limit = pLimit(5);
+  const tasks = missing.map((claim) => limit(async () => {
+    const idx = ++processed;
     const label = `${claim.matterNumber || "#" + claim.id} (${claim.lastName}, ${claim.firstName} | DOI: ${claim.dateOfInjury} | ${claim.stateOfInjury || "?"} | ${claim.partnerName || "no partner"})`;
 
-    if ((i + 1) % 25 === 0) console.log(`  ... ${i + 1}/${missing.length}`);
+    if (idx % 25 === 0) console.log(`  ... ${idx}/${missing.length}`);
 
     let workers: ShiftWorker[];
     try {
-      // First try with partner name to narrow results
       workers = claim.partnerName
         ? await findShiftWorkers(claim.dateOfInjury, claim.partnerName)
         : [];
 
-      // If no results with partner, try date-only
       if (workers.length === 0) {
         workers = await findShiftWorkers(claim.dateOfInjury, null);
       }
     } catch (err: any) {
       errorCount++;
       stillUnresolved.push({ claim, reason: `error: ${err.message}` });
-      continue;
+      return;
     }
 
     if (workers.length === 0) {
       noShiftData++;
       stillUnresolved.push({ claim, reason: "no shifts found on DOI" });
-      continue;
+      return;
     }
 
-    // Among workers on this shift (DOI+partner), find who matches the claimant's name.
-    // Even if multiple workers on the shift, exactly one name match → that's the worker.
     const scored = workers.map((w) => {
       const fnScore = Math.max(
         nameSimilarity(claim.firstName, w.givenName || ""),
-        nameSimilarity(claim.firstName, (w.name || "").split(" ")[0] || "")
+        nameSimilarity(claim.firstName, (w.name || "").split(" ")[0] || ""),
       );
       const lnScore = Math.max(
         nameSimilarity(claim.lastName, w.familyName || ""),
-        nameSimilarity(claim.lastName, (w.name || "").split(" ").slice(1).join(" ") || "")
+        nameSimilarity(claim.lastName, (w.name || "").split(" ").slice(1).join(" ") || ""),
       );
       return { worker: w, score: (fnScore + lnScore) / 2, fnScore, lnScore };
     });
 
-    // Strong match: both first and last name must be exact or near-exact
     const strong = scored.filter((s) => s.fnScore >= 0.9 && s.lnScore >= 0.9);
 
     if (strong.length === 1) {
@@ -253,8 +202,7 @@ async function run() {
       const w = strong[0].worker;
       console.log(`  SHIFT-MATCH  ${label} → Pro ${w.workerId} (${w.name}, ${w.workerStatus}, worked at ${w.businessName})`);
       if (EXECUTE) {
-        await upsertPro(w);
-        // High-confidence: single strong name match on shift — safe to persist
+        await upsertPro(toProUpsertData(w));
         await db.update(claims).set({ proId: String(w.workerId) }).where(eq(claims.id, claim.id));
       }
     } else if (strong.length > 1) {
@@ -267,15 +215,13 @@ async function run() {
         nearMatch: near.map((s) => `[NEAR] Pro ${s.worker.workerId} (${s.worker.name}, score=${s.score.toFixed(2)}, ${s.worker.businessName})`),
       });
     } else {
-      // Slightly looser: both names >= 0.8 (handles nicknames like Jackie/Jacqueline, Jeff/Jeffrey)
       const loose = scored.filter((s) => s.fnScore >= 0.8 && s.lnScore >= 0.9).sort((a, b) => b.score - a.score);
       if (loose.length === 1) {
         shiftMatched++;
         const w = loose[0].worker;
         console.log(`  SHIFT-MATCH (close)  ${label} → Pro ${w.workerId} (${w.name}, fn=${loose[0].fnScore.toFixed(2)} ln=${loose[0].lnScore.toFixed(2)}, ${w.businessName})`);
         if (EXECUTE) {
-          await upsertPro(w);
-          // High-confidence: single loose name match on shift (e.g. nickname) — safe to persist
+          await upsertPro(toProUpsertData(w));
           await db.update(claims).set({ proId: String(w.workerId) }).where(eq(claims.id, claim.id));
         }
       } else {
@@ -291,13 +237,14 @@ async function run() {
             ? `no strong name match among ${workers.length} shift workers`
             : "no shifts found matching name",
           candidates: topCandidates.map((s) =>
-            `Pro ${s.worker.workerId} (${s.worker.name}, fn=${s.fnScore.toFixed(2)} ln=${s.lnScore.toFixed(2)}, ${s.worker.businessName})`
+            `Pro ${s.worker.workerId} (${s.worker.name}, fn=${s.fnScore.toFixed(2)} ln=${s.lnScore.toFixed(2)}, ${s.worker.businessName})`,
           ),
           nearMatch: near.map((s) => `[NEAR] Pro ${s.worker.workerId} (${s.worker.name}, score=${s.score.toFixed(2)}, ${s.worker.businessName})`),
         });
       }
     }
-  }
+  }));
+  await Promise.all(tasks);
 
   console.log("\n========== SUMMARY ==========");
   console.log(`Total remaining:     ${missing.length}`);
@@ -328,5 +275,5 @@ async function run() {
 }
 
 run()
-  .then(() => { pool.end(); process.exit(0); })
-  .catch((err) => { console.error("Failed:", err); pool.end(); process.exit(1); });
+  .then(() => teardown(0))
+  .catch((err) => { console.error("Failed:", err); teardown(1); });
