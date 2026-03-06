@@ -21,10 +21,24 @@ import {
 import { db } from "./db";
 import { eq, desc, sql, ilike, or, and, isNull, SQL } from "drizzle-orm";
 
+// Build a single searchable text block from all name-related fields.
+// Concatenates first, middle, last, suffix, preferred, and all aliases
+// so trigram similarity and ILIKE both work across every name a person uses.
+function nameSearchExpr() {
+  return sql`(
+    COALESCE(first_name,'') || ' ' ||
+    COALESCE(middle_name,'') || ' ' ||
+    COALESCE(last_name,'') || ' ' ||
+    COALESCE(suffix,'') || ' ' ||
+    COALESCE(preferred_name,'') || ' ' ||
+    COALESCE(array_to_string(name_aliases, ' '),'')
+  )`;
+}
+
 function buildSmartSearch(query: string): SQL {
   const trimmed = query.trim();
   const tokens = trimmed.split(/\s+/).filter(Boolean);
-  const fullName = sql`(first_name || ' ' || last_name)`;
+  const allNames = nameSearchExpr();
 
   const conditions: SQL[] = [];
 
@@ -33,16 +47,20 @@ function buildSmartSearch(query: string): SQL {
     const pat = `%${t}%`;
     conditions.push(sql`(
       first_name ILIKE ${pat}
+      OR middle_name ILIKE ${pat}
       OR last_name ILIKE ${pat}
+      OR preferred_name ILIKE ${pat}
+      OR ${allNames} ILIKE ${pat}
       OR partner_name ILIKE ${pat}
       OR tpa_claim_id ILIKE ${pat}
       OR matter_number ILIKE ${pat}
       OR pro_id ILIKE ${pat}
     )`);
   } else {
+    // Each token must match somewhere in the full name block
     const tokenConditions = tokens.map((t) => {
       const pat = `%${t}%`;
-      return sql`(first_name ILIKE ${pat} OR last_name ILIKE ${pat})`;
+      return sql`(${allNames} ILIKE ${pat})`;
     });
     conditions.push(sql`(${sql.join(tokenConditions, sql` AND `)})`);
 
@@ -52,7 +70,8 @@ function buildSmartSearch(query: string): SQL {
     conditions.push(sql`matter_number ILIKE ${fullPat}`);
   }
 
-  conditions.push(sql`similarity(${fullName}, ${trimmed}) > 0.25`);
+  // Trigram similarity across all name fields
+  conditions.push(sql`similarity(${allNames}, ${trimmed}) > 0.25`);
 
   return sql`(${sql.join(conditions, sql` OR `)})`;
 }

@@ -1,12 +1,13 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { UseFormReturn } from "react-hook-form";
 import {
   ArrowLeft, ArrowRight, Loader2, Briefcase, Building2,
-  CheckCircle2, AlertTriangle, Clock, HelpCircle,
+  CheckCircle2, AlertTriangle, Clock, HelpCircle, Plus, X,
 } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
 import {
   FormControl,
@@ -90,7 +91,20 @@ export function ProSearchStep({
   fetchOpenClaims,
   fetchShiftStats,
 }: ProSearchStepProps) {
+  const [aliasInput, setAliasInput] = useState("");
   const watchedDate = form.watch("dateOfInjury");
+  const nameAliases: string[] = form.watch("nameAliases") || [];
+
+  function addAlias() {
+    const val = aliasInput.trim();
+    if (!val || nameAliases.includes(val)) return;
+    form.setValue("nameAliases", [...nameAliases, val]);
+    setAliasInput("");
+  }
+
+  function removeAlias(alias: string) {
+    form.setValue("nameAliases", nameAliases.filter((a) => a !== alias));
+  }
 
   const dateMatchInfo = useMemo(() => {
     if (!watchedDate || recentShifts.length === 0) return null;
@@ -192,6 +206,18 @@ export function ProSearchStep({
             />
             <FormField
               control={form.control}
+              name="middleName"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-xs">Middle Name / Initial <span className="text-muted-foreground">(optional)</span></FormLabel>
+                  <FormControl>
+                    <Input {...field} className="h-8 text-sm" placeholder="e.g. Keith or R." />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
               name="lastName"
               render={({ field }) => (
                 <FormItem>
@@ -203,7 +229,62 @@ export function ProSearchStep({
                 </FormItem>
               )}
             />
+            <FormField
+              control={form.control}
+              name="suffix"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-xs">Suffix <span className="text-muted-foreground">(optional)</span></FormLabel>
+                  <FormControl>
+                    <Input {...field} className="h-8 text-sm" placeholder="Jr., Sr., II, III…" />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="preferredName"
+              render={({ field }) => (
+                <FormItem className="sm:col-span-2">
+                  <FormLabel className="text-xs">Goes By / Preferred Name <span className="text-muted-foreground">(optional)</span></FormLabel>
+                  <FormControl>
+                    <Input {...field} className="h-8 text-sm" placeholder="e.g. Keith (for Richard Keith Chapman)" />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
           </div>
+
+          {/* Name aliases */}
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium">Other Names / Aliases <span className="text-muted-foreground">(optional)</span></p>
+            <p className="text-[10px] text-muted-foreground">Maiden names, alternate spellings, cultural names, or any other name this person uses.</p>
+            <div className="flex gap-2">
+              <Input
+                value={aliasInput}
+                onChange={(e) => setAliasInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addAlias(); } }}
+                className="h-8 text-sm flex-1"
+                placeholder="Type a name and press Enter"
+              />
+              <Button type="button" variant="outline" size="sm" className="h-8" onClick={addAlias}>
+                <Plus className="h-3 w-3" />
+              </Button>
+            </div>
+            {nameAliases.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {nameAliases.map((alias) => (
+                  <Badge key={alias} variant="secondary" className="text-xs gap-1 pr-1">
+                    {alias}
+                    <button type="button" onClick={() => removeAlias(alias)} className="hover:text-destructive">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
+          </div>
+
           <Button
             type="button"
             variant="ghost"
