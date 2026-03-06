@@ -16,17 +16,17 @@ Incidentally is Instawork's internal injury claims management tool for Trust & S
 
 **Date:** 2026-02-27
 **Phase:** Phase 2 — Enhancements & Integrations
-**Active task:** 2.1 — Database name cleanup review
-**Branch:** task/2.1-name-cleanup
+**Active task:** 2.2 — Google Drive document import
+**Branch:** task/2.1-name-cleanup (ready to merge)
 **Blocker:** None
-**Last session:** Integrated cursor-build-template process engine; added live splash page stats from real DB data
-**Next up:** Query DB for claimant names with extra characters/terms that need cleaning up
+**Last session:** Completed name cleanup — added middle_name, suffix, preferred_name, name_aliases schema fields; fixed 5 malformed records; updated search and UI
+**Next up:** Merge task/2.1-name-cleanup, then begin Google Drive document import (task 2.2)
 
 ---
 
 ## Active Tasks
 
-- [ ] **2.1** — Review and clean up claimant/Pro names in the database (extra characters, honorifics, data artifacts)
+- [x] **2.1** — Review and clean up claimant/Pro names in the database ✅
 - [ ] **2.2** — Google Drive document import (match files by claimant name to open incidents, store in document library)
 - [ ] **2.3** — Google Workspace sign-on (replace placeholder session auth with real Google OAuth)
 - [ ] **2.4** — Pro Details card: add shift count stats (total / W2 / 1099) and open claims check
