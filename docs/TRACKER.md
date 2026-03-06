@@ -60,16 +60,17 @@ Status: ✅ Done · 🔧 In progress · ⬜ Not started · 🚫 Blocked
 
 ## Phase 4 — AI Agents (planned)
 
-**Goal:** Evolve from a data management tool into an AI-powered claims assistant. The system ingests all available claim information and either prompts users on next steps or takes those steps autonomously.
+**Focus: T&S agents.** Litigation workflows are Phase 5+.
+**Philosophy:** Deterministic rule-based tasks can be automated immediately. LLM-powered tasks run in suggestion-only mode first — graduate to autonomous only after output is validated in practice.
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 4.1 | LLM integration layer — shared client with retries, cost logging, model config | ⬜ | Foundation for all agent tasks; use company OpenAI account |
-| 4.2 | Document field extraction — when a doc is uploaded, extract key fields (dates, diagnoses, treatment, amounts) and surface for user confirmation | ⬜ | Depends on 2.2 (Drive import) for volume |
-| 4.3 | Claim context summarizer — generate a plain-English summary of each claim's current state, history, and missing information | ⬜ | Powers the next-step prompter |
-| 4.4 | Next-step prompter on User Home — surface what each open claim needs right now, ranked by urgency | ⬜ | Depends on 4.3; replaces static User Home placeholder |
-| 4.5 | Proactive workflow triggers — flag overdue items, reserve review needs, litigation criteria met | ⬜ | Rule-based first, LLM-enhanced later |
-| 4.6 | Autonomous actions with confirmation — draft letters, request TPA updates, flag reserves, with user approval before executing | ⬜ | Depends on 4.4 + 3.3 (auth/roles) |
+| 4.1 | LLM provider layer — model-agnostic interface with adapters for OpenAI, Anthropic, Google; retries, cost + latency logging | ⬜ | Foundation for all LLM tasks. Must come first. |
+| 4.2 | Deterministic automation — auto-assign carrier/coverage from worker type + state; flag duplicate Pro claims | ⬜ | No LLM needed; rule-based; safe to fully automate immediately |
+| 4.3 | Document field extractor — extract dates, diagnoses, treatment notes from uploaded docs; show to user for confirmation before writing | ⬜ | LLM — suggestion mode only until validated. Depends on 2.2 for volume. |
+| 4.4 | Claim summarizer — plain-English summary of claim state, history, data gaps, and urgency | ⬜ | LLM — display only, powers next-step prompter |
+| 4.5 | T&S next-step prompter on User Home — what each open claim needs right now, ranked by urgency | ⬜ | LLM — suggestion only first. Replaces static User Home placeholder. Depends on 4.4. |
+| 4.6 | Routine action agent — handle routine tasks autonomously after output is validated (e.g., request missing docs, update claim status) | ⬜ | LLM — autonomous only after 4.5 is trusted. Depends on 3.3 (auth/roles). |
 | 4.7 | Gmail ingestion agent — monitor inbox for claim-related emails, auto-attach to correct incident | ⬜ | Depends on 3.5 |
 
 ---

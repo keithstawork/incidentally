@@ -45,11 +45,12 @@ See TRACKER.md Phase 1 for full completed task list.
 - Document library: Gmail ingestion (Phase 3)
 - More Redshift data integrations
 
-**Phase 4 — AI Agents (future):**
-- Document ingestion + field extraction (read uploaded docs, auto-populate claim fields)
-- Next-step prompter on User Home (surface what each open claim needs right now)
-- Proactive workflow triggers (overdue flags, reserve reviews, litigation criteria)
-- Autonomous actions with user confirmation (draft letters, request TPA updates, flag reserves)
+**Phase 4 — AI Agents (future, T&S focus):**
+- Deterministic automation first: auto-assign carrier/coverage, flag duplicate claims (no LLM needed)
+- LLM agents in suggestion-only mode until output is validated: doc field extractor, claim summarizer, T&S next-step prompter
+- Autonomous routine actions only after suggestion mode is trusted
+- Model-agnostic LLM layer — OpenAI, Anthropic, Google adapters; different agents may use different models
+- Litigation workflows are Phase 5+
 
 ---
 

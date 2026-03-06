@@ -123,32 +123,57 @@ Applied via Tailwind CSS variables. Key colors:
 
 ## Phase 4: AI Agent Architecture (planned)
 
-**Goal:** The system ingests all available claim information and either surfaces next-step prompts to the user or takes those steps autonomously.
+**Goal:** The system ingests all available claim information and surfaces next-step prompts to T&S agents — and eventually handles routine steps autonomously. Litigation workflows are explicitly out of scope for Phase 4.
 
-**Data available to agents:**
+**Focus user: T&S agent** (not paralegal or litigator). T&S handles intake, initial investigation, coverage determination, Pro verification, and routing. Legal/litigation workflows are Phase 5+.
+
+### Data available to agents
 - PostgreSQL: full claim record (all fields, notes, history, financials)
-- S3/documents: uploaded files (medical records, correspondence, legal docs)
-- Redshift: Pro shift history, earnings, worker classification, account history
+- S3/documents: uploaded files (medical records, correspondence, intake docs)
+- Redshift: Pro shift history, earnings, worker classification, account history, active status
 - External: TPA system (future), carrier portals (future)
 
-**Planned agent types:**
+### Automation philosophy
 
-| Agent | Trigger | What it does |
-|---|---|---|
-| Document extractor | Document uploaded | Extract key fields (injury date, diagnosis, treatment, dollar amounts) → surface for user confirmation → write confirmed fields to claim |
-| Claim summarizer | On demand / claim open | Generate plain-English summary of claim state, history, gaps, and urgency |
-| Next-step prompter | User Home load | For each open claim: what needs to happen next, ranked by urgency |
-| Workflow trigger | Scheduled / event-driven | Flag overdue items, reserve review needs, litigation criteria met |
-| Action agent | User approval | Draft letters, request TPA updates, flag reserves — always with confirmation before executing |
+**Two categories of tasks — treated very differently:**
 
-**Design principles for agents:**
-- **Always confirm before writing** — agents suggest, users approve (at least in Phase 4.1–4.5)
-- **Show your reasoning** — every prompt includes why the agent is suggesting it
-- **Graceful fallback** — if LLM fails or returns low-confidence output, surface for manual review rather than silently failing
-- **Cost-conscious** — use `gpt-4o-mini` by default; only escalate to `gpt-4o` for complex reasoning tasks; log token usage
-- **One shared LLM client** — all agent calls go through `server/lib/llm-client.ts` (to be created in task 4.1)
+1. **Routine deterministic tasks** — rule-based, no meaningful human oversight needed, safe to automate fully from the start. Examples: assigning a carrier based on worker type + state, generating the incident number, auto-populating coverage type, flagging duplicate Pro claims.
 
-**Key dependency:** Agents need auth + roles (task 3.3) before autonomous actions can be role-gated properly.
+2. **Judgment-requiring tasks** — LLM-powered, require testing before automation. These start as **display-only suggestions** (agent shows output, user confirms or edits). Only graduate to autonomous once we've validated the output quality in practice.
+
+**Sequencing rule:** No LLM-powered task runs autonomously until it has been run in suggestion-only mode and the output has been reviewed and trusted.
+
+### Planned agent types (T&S focus)
+
+| Agent | Category | Phase | Trigger | What it does |
+|---|---|---|---|---|
+| Coverage router | Deterministic | 4.2 | Claim created | Auto-assign carrier + coverage type based on worker type + state — no LLM needed |
+| Duplicate checker | Deterministic | 4.2 | Claim created | Flag if Pro has other open claims |
+| Document field extractor | LLM — suggest first | 4.3 | Document uploaded | Extract dates, diagnoses, treatment notes → surface for user confirmation before writing |
+| Claim summarizer | LLM — suggest first | 4.4 | Claim opened | Plain-English summary of claim state, history, data gaps, and urgency |
+| T&S next-step prompter | LLM — suggest first | 4.5 | User Home load | For each open claim: what a T&S agent should do next, ranked by urgency |
+| Routine action agent | LLM → autonomous after testing | 4.6 | Event-driven | Handle routine tasks autonomously once output is trusted (e.g., request missing docs, update status) |
+| Gmail ingestion agent | Mixed | 4.7 | Scheduled | Monitor inbox for claim-related emails, auto-attach to correct incident |
+
+### LLM provider strategy
+
+LLM choice is not yet decided — OpenAI, Anthropic, and Google are all candidates, and different agents may perform better with different models. Architecture must support this.
+
+- Build a **`LLMProvider` interface** in `server/lib/llm-client.ts` — all agent calls go through it
+- Implement adapters for OpenAI, Anthropic (Claude), and Google (Gemini) behind the same interface
+- Each agent can declare a preferred provider + model, allowing A/B testing
+- Log provider, model, token usage, and latency for every call — required for cost tracking and model selection decisions
+- Default to the cheapest capable model for each task; only escalate when quality requires it
+- Use company accounts where available; `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_AI_API_KEY` in `.env`
+
+### Design principles
+- **Show reasoning** — every suggestion includes why the agent is recommending it
+- **Graceful fallback** — if LLM output is low-confidence or fails, surface for manual review rather than silently failing or blocking
+- **Suggest before automating** — LLM tasks run in read-only suggestion mode first; autonomous only after output is validated
+- **Deterministic tasks need no LLM** — don't use AI where a rule works reliably
+- **One interface, many providers** — never scatter raw OpenAI/Anthropic calls; everything goes through `server/lib/llm-client.ts`
+
+**Key dependency:** Agents need auth + roles (task 3.3) before autonomous actions can be role-gated by user type.
 
 ---
 
